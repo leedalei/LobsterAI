@@ -5,6 +5,7 @@ import { clearCurrentSession, setCurrentSession, setStreaming } from '../../stor
 import { clearActiveSkills, setActiveSkillIds } from '../../store/slices/skillSlice';
 import { setActions, selectAction, clearSelection } from '../../store/slices/quickActionSlice';
 import { coworkService } from '../../services/cowork';
+import { authService } from '../../services/auth';
 import { skillService } from '../../services/skill';
 import { quickActionService } from '../../services/quickAction';
 import { i18nService } from '../../services/i18n';
@@ -45,10 +46,27 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
     config,
   } = useSelector((state: RootState) => state.cowork);
 
+  const isLoggedIn = useSelector((state: RootState) => state.auth.isLoggedIn);
+  const selectedModel = useSelector((state: RootState) => state.model.selectedModel);
   const activeSkillIds = useSelector((state: RootState) => state.skill.activeSkillIds);
   const skills = useSelector((state: RootState) => state.skill.skills);
   const quickActions = useSelector((state: RootState) => state.quickAction.actions);
   const selectedActionId = useSelector((state: RootState) => state.quickAction.selectedActionId);
+
+  /**
+   * Check if the current model requires login.
+   * A model requires login if it is the proxy model, or if the local provider has no API key.
+   */
+  const needsLoginForCurrentModel = (): boolean => {
+    if (selectedModel.providerKey === 'lobsterai-proxy') {
+      return !isLoggedIn;
+    }
+    // For local provider models, check if the provider has an API key configured
+    // If providerKey is present and the user has not configured that provider, they need login
+    // (or they need to configure the provider).
+    // We do a simple check here: if no config at all, needs login.
+    return false; // local models don't need login
+  };
 
   const buildApiConfigNotice = (error?: string) => {
     const baseNotice = i18nService.t('coworkModelSettingsRequired');
@@ -109,6 +127,19 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
   const handleStartSession = async (prompt: string, skillPrompt?: string, imageAttachments?: CoworkImageAttachment[]) => {
     // Prevent duplicate submissions
     if (isStartingRef.current) return;
+
+    // Check if login is required for the current model
+    if (needsLoginForCurrentModel()) {
+      // Show login required toast/prompt
+      window.dispatchEvent(new CustomEvent('app:showToast', {
+        detail: {
+          type: 'info',
+          message: i18nService.t('authLoginRequired'),
+        },
+      }));
+      return;
+    }
+
     isStartingRef.current = true;
     const requestId = ++startRequestIdRef.current;
     pendingStartRef.current = { requestId, cancelled: false };
@@ -401,7 +432,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
                 onSubmit={handleStartSession}
                 onStop={handleStopSession}
                 isStreaming={isStreaming}
-                placeholder={i18nService.t('coworkPlaceholder')}
+                placeholder={needsLoginForCurrentModel() ? i18nService.t('authLoginToChat') : i18nService.t('coworkPlaceholder')}
                 size="large"
                 workingDirectory={config.workingDirectory}
                 onWorkingDirectoryChange={async (dir: string) => {
