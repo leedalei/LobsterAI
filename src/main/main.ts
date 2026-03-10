@@ -917,9 +917,45 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Register custom protocol for OAuth callback
+  app.setAsDefaultProtocolClient('lobsterai');
+
+  // macOS: handle open-url event for deep links
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
+        const code = parsed.searchParams.get('code');
+        if (code && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('auth:callback', { code });
+        }
+      }
+    } catch (e) {
+      console.error('[Main] Failed to parse open-url:', e);
+    }
+  });
+
   app.on('second-instance', (_event, commandLine, workingDirectory) => {
     console.log('[Main] second-instance event', { commandLine, workingDirectory });
-    // 如果尝试启动第二个实例，则聚焦到主窗口
+
+    // Check for deep link in command line args (Windows/Linux)
+    const deepLink = commandLine.find(arg => arg.startsWith('lobsterai://'));
+    if (deepLink) {
+      try {
+        const parsed = new URL(deepLink);
+        if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
+          const code = parsed.searchParams.get('code');
+          if (code && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('auth:callback', { code });
+          }
+        }
+      } catch (e) {
+        console.error('[Main] Failed to parse deep link:', e);
+      }
+    }
+
+    // Focus main window
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
@@ -1058,6 +1094,143 @@ if (!gotTheLock) {
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
   ipcMain.handle('app:getSystemLocale', () => app.getLocale());
+
+  // ── Auth IPC handlers ──
+
+  /**
+   * Helper: Read the server base URL from the app config stored in SQLite.
+   * Falls back to a compile-time default if nothing is persisted yet.
+   */
+  const getServerBaseUrl = (): string => {
+    const cfg = getStore().get<{ server?: { baseUrl?: string } }>('app_config');
+    return cfg?.server?.baseUrl || 'https://api.lobsterai.com';
+  };
+
+  /**
+   * Helper: Persist auth tokens into the kv store.
+   */
+  const saveAuthTokens = (accessToken: string, refreshToken: string) => {
+    getStore().set('auth_tokens', { accessToken, refreshToken });
+  };
+
+  const getAuthTokens = (): { accessToken: string; refreshToken: string } | null => {
+    return getStore().get<{ accessToken: string; refreshToken: string }>('auth_tokens') || null;
+  };
+
+  const clearAuthTokens = () => {
+    getStore().delete('auth_tokens');
+  };
+
+  ipcMain.handle('auth:login', async () => {
+    try {
+      const serverBaseUrl = getServerBaseUrl();
+      const loginUrl = `${serverBaseUrl}/api/auth/login?source=electron`;
+      await shell.openExternal(loginUrl);
+      return { success: true };
+    } catch (error) {
+      console.error('[Auth] login failed:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to open login' };
+    }
+  });
+
+  ipcMain.handle('auth:exchange', async (_event, { code }: { code: string }) => {
+    try {
+      const serverBaseUrl = getServerBaseUrl();
+      const resp = await fetch(`${serverBaseUrl}/api/auth/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      if (!resp.ok) {
+        return { success: false, error: `Exchange failed: ${resp.status}` };
+      }
+      const data = await resp.json() as {
+        accessToken: string;
+        refreshToken: string;
+        user: Record<string, unknown>;
+        quota: Record<string, unknown>;
+      };
+      saveAuthTokens(data.accessToken, data.refreshToken);
+      return { success: true, user: data.user, quota: data.quota };
+    } catch (error) {
+      console.error('[Auth] exchange failed:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Exchange failed' };
+    }
+  });
+
+  ipcMain.handle('auth:getUser', async () => {
+    try {
+      const tokens = getAuthTokens();
+      if (!tokens) return { success: false };
+      const serverBaseUrl = getServerBaseUrl();
+      const resp = await fetch(`${serverBaseUrl}/api/user/profile`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (!resp.ok) return { success: false };
+      const data = await resp.json() as { user: Record<string, unknown>; quota: Record<string, unknown> };
+      return { success: true, user: data.user, quota: data.quota };
+    } catch {
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('auth:getQuota', async () => {
+    try {
+      const tokens = getAuthTokens();
+      if (!tokens) return { success: false };
+      const serverBaseUrl = getServerBaseUrl();
+      const resp = await fetch(`${serverBaseUrl}/api/user/quota`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (!resp.ok) return { success: false };
+      const data = await resp.json() as { quota: Record<string, unknown> };
+      return { success: true, quota: data.quota };
+    } catch {
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('auth:logout', async () => {
+    try {
+      const tokens = getAuthTokens();
+      if (tokens) {
+        const serverBaseUrl = getServerBaseUrl();
+        await fetch(`${serverBaseUrl}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        }).catch(() => { /* best-effort */ });
+      }
+      clearAuthTokens();
+      return { success: true };
+    } catch {
+      clearAuthTokens();
+      return { success: true };
+    }
+  });
+
+  ipcMain.handle('auth:refreshToken', async () => {
+    try {
+      const tokens = getAuthTokens();
+      if (!tokens?.refreshToken) return { success: false };
+      const serverBaseUrl = getServerBaseUrl();
+      const resp = await fetch(`${serverBaseUrl}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+      });
+      if (!resp.ok) return { success: false };
+      const data = await resp.json() as { accessToken: string; refreshToken?: string };
+      saveAuthTokens(data.accessToken, data.refreshToken || tokens.refreshToken);
+      return { success: true, accessToken: data.accessToken };
+    } catch {
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('auth:getAccessToken', async () => {
+    const tokens = getAuthTokens();
+    return tokens?.accessToken || null;
+  });
 
   // Skills IPC handlers
   ipcMain.handle('skills:list', () => {

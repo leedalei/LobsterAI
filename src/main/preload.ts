@@ -323,4 +323,18 @@ contextBridge.exposeInMainWorld('electron', {
   networkStatus: {
     send: (status: 'online' | 'offline') => ipcRenderer.send('network:status-change', status),
   },
+  auth: {
+    login: () => ipcRenderer.invoke('auth:login'),
+    exchange: (code: string) => ipcRenderer.invoke('auth:exchange', { code }),
+    getUser: () => ipcRenderer.invoke('auth:getUser'),
+    getQuota: () => ipcRenderer.invoke('auth:getQuota'),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+    refreshToken: () => ipcRenderer.invoke('auth:refreshToken'),
+    getAccessToken: () => ipcRenderer.invoke('auth:getAccessToken'),
+    onCallback: (callback: (data: { code: string }) => void) => {
+      const handler = (_event: any, data: { code: string }) => callback(data);
+      ipcRenderer.on('auth:callback', handler);
+      return () => ipcRenderer.removeListener('auth:callback', handler);
+    },
+  },
 });
