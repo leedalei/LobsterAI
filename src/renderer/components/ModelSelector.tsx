@@ -2,7 +2,8 @@ import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
 import { ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline';
-import { setSelectedModel, isSameModelIdentity, getModelIdentityKey } from '../store/slices/modelSlice';
+import { setSelectedModel, isSameModelIdentity, getModelIdentityKey, type Model } from '../store/slices/modelSlice';
+import { i18nService } from '../services/i18n';
 
 interface ModelSelectorProps {
   dropdownDirection?: 'up' | 'down';
@@ -57,6 +58,11 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ dropdownDirection = 'down
         className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover dark:text-claude-darkText text-claude-text transition-colors cursor-pointer ${isOpen ? 'dark:bg-claude-darkSurfaceHover bg-claude-surfaceHover' : ''}`}
       >
         <span className="font-medium text-sm">{selectedModel.name}</span>
+        {(selectedModel as Model).isFree && (
+          <span className="text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">
+            {i18nService.t('authFreeLabel')}
+          </span>
+        )}
         <ChevronDownIcon className="h-4 w-4 dark:text-claude-darkTextSecondary text-claude-textSecondary" />
       </button>
 
@@ -72,7 +78,14 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ dropdownDirection = 'down
               }`}
             >
               <div className="flex flex-col">
-                <span className="text-sm">{model.name}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">{model.name}</span>
+                  {(model as Model).isFree && (
+                    <span className="text-[10px] font-semibold leading-none px-1.5 py-0.5 rounded bg-green-500/15 text-green-600 dark:text-green-400">
+                      {i18nService.t('authFreeLabel')}
+                    </span>
+                  )}
+                </div>
                 {model.provider && (
                   <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">{model.provider}</span>
                 )}
