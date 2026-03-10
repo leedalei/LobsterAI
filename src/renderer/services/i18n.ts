@@ -128,6 +128,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     collapse: '收起',
     expand: '展开',
     featureInDevelopment: '正在开发中',
+
+    // 认证相关
+    authDailyQuota: '今日额度',
+    authTopUp: '充值',
+    authLogout: '退出登录',
+    authLoginRequired: '请先登录后再开始对话。',
+    authLoginRequiredBtn: '登录',
+    authQuotaExhausted: '今日免费额度已用完。您可以登录 LobsterAI Portal 购买套餐或积分包继续使用，或在设置中配置自己的 API Key。',
+    authTopUpLink: '充值',
+    authSettingsLink: '设置',
+    authLoginToChat: '登录后即可开始聊天',
+    authFreeLabel: 'Free',
     
     // 错误信息
     failedToLoadSettings: '加载设置失败',
@@ -898,6 +910,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     collapse: 'Collapse',
     expand: 'Expand',
     featureInDevelopment: 'In development',
+
+    // Auth
+    authDailyQuota: 'Daily Quota',
+    authTopUp: 'Top Up',
+    authLogout: 'Log Out',
+    authLoginRequired: 'Please log in to start a conversation.',
+    authLoginRequiredBtn: 'Log In',
+    authQuotaExhausted: 'Daily free quota exhausted. Visit LobsterAI Portal to purchase a plan or credits, or configure your own API Key in Settings.',
+    authTopUpLink: 'Top Up',
+    authSettingsLink: 'Settings',
+    authLoginToChat: 'Log in to start chatting',
+    authFreeLabel: 'Free',
     
     // Error Messages
     failedToLoadSettings: 'Failed to load settings',
