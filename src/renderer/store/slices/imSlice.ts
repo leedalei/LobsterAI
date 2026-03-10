@@ -10,9 +10,12 @@ import type {
   DingTalkConfig,
   FeishuConfig,
   TelegramOpenClawConfig,
+  QQConfig,
+  TelegramConfig,
   DiscordConfig,
   NimConfig,
   XiaomifengConfig,
+  WecomConfig,
   IMSettings,
 } from '../../types/im';
 import {
@@ -52,6 +55,11 @@ const imSlice = createSlice({
         ...state.config.telegram,
         ...action.payload,
       };
+    setQQConfig: (state, action: PayloadAction<Partial<QQConfig>>) => {
+      state.config.qq = { ...state.config.qq, ...action.payload };
+    },
+    setTelegramConfig: (state, action: PayloadAction<Partial<TelegramConfig>>) => {
+      state.config.telegram = { ...state.config.telegram, ...action.payload };
     },
     setDiscordConfig: (state, action: PayloadAction<Partial<DiscordConfig>>) => {
       state.config.discord = { ...state.config.discord, ...action.payload };
@@ -61,6 +69,9 @@ const imSlice = createSlice({
     },
     setXiaomifengConfig: (state, action: PayloadAction<Partial<XiaomifengConfig>>) => {
       state.config.xiaomifeng = { ...state.config.xiaomifeng, ...action.payload };
+    },
+    setWecomConfig: (state, action: PayloadAction<Partial<WecomConfig>>) => {
+      state.config.wecom = { ...state.config.wecom, ...action.payload };
     },
     setIMSettings: (state, action: PayloadAction<Partial<IMSettings>>) => {
       state.config.settings = { ...state.config.settings, ...action.payload };
@@ -85,9 +96,12 @@ export const {
   setDingTalkConfig,
   setFeishuConfig,
   setTelegramOpenClawConfig,
+  setQQConfig,
+  setTelegramConfig,
   setDiscordConfig,
   setNimConfig,
   setXiaomifengConfig,
+  setWecomConfig,
   setIMSettings,
   setStatus,
   setLoading,

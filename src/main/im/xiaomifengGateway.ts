@@ -378,7 +378,7 @@ export class XiaomifengGateway extends EventEmitter {
       console.log('[Xiaomifeng Gateway] Attempting SDK init with appKey:', XiaomifengGateway.FIXED_APP_KEY);
       this.v2Client = new NIM({
         appkey: XiaomifengGateway.FIXED_APP_KEY,
-        debugLevel: "log",
+        debugLevel: "warn",
         apiVersion: 'v2',
       }) as unknown as V2NIM;
       console.log('[Xiaomifeng Gateway] SDK initialized successfully, dataPath:', dataPath);
@@ -567,7 +567,6 @@ export class XiaomifengGateway extends EventEmitter {
       // Ignore offline/roaming messages synced on reconnect
       const messageSource: number = msg.messageSource ?? 0;
       if (messageSource !== 1) {
-        this.log(`[Xiaomifeng Gateway] Ignoring non-online message (messageSource=${messageSource})`);
         return;
       }
 
@@ -972,5 +971,9 @@ export class XiaomifengGateway extends EventEmitter {
 
     await this.sendBeeReply(this.lastConversation.conversationId, text);
     this.status.lastOutboundAt = Date.now();
+  }
+
+  async sendNotificationWithMedia(text: string): Promise<void> {
+    await this.sendNotification(text);
   }
 }

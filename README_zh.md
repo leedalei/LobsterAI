@@ -69,6 +69,37 @@ npm run electron:dev
 
 开发服务器默认运行在 `http://localhost:5175`。
 
+#### 带 OpenClaw Agent 引擎开发
+
+LobsterAI 可以使用 [OpenClaw](https://github.com/openclaw/openclaw) 作为 Agent 引擎。
+所依赖的 OpenClaw 版本在 `package.json` 的 `openclaw.version` 字段中声明。
+
+```bash
+# 首次运行：自动克隆并构建 OpenClaw（可能需要几分钟）
+npm run electron:dev:openclaw
+
+# 后续运行：如果锁定版本未变，自动跳过构建
+npm run electron:dev:openclaw
+```
+
+默认 OpenClaw 源码会被克隆/管理在 `../openclaw`（相对于本仓库）。可通过环境变量覆盖：
+
+```bash
+OPENCLAW_SRC=/path/to/openclaw npm run electron:dev:openclaw
+```
+
+强制重新构建（即使版本未变）：
+
+```bash
+OPENCLAW_FORCE_BUILD=1 npm run electron:dev:openclaw
+```
+
+跳过自动版本切换（如需本地开发 OpenClaw 时）：
+
+```bash
+OPENCLAW_SKIP_ENSURE=1 npm run electron:dev:openclaw
+```
+
 ### 生产构建
 
 ```bash
@@ -104,12 +135,8 @@ npm run dist:linux
 ```
 
 桌面端打包（macOS / Windows / Linux）都会把预构建的 OpenClaw runtime 内置到 `Resources/cfmind`。
-`npm run dist:mac`、`npm run dist:win`、`npm run dist:linux` 在打包前都会自动执行对应平台的 OpenClaw runtime 构建步骤。
-默认 OpenClaw 源码路径为相对本仓库的 `../openclaw`，也可按需覆盖：
-
-```bash
-OPENCLAW_SRC=/path/to/openclaw npm run dist:win
-```
+锁定的 OpenClaw 版本（`package.json` → `openclaw.version`）在打包时会自动拉取并构建，无需手动操作。
+构建结果带缓存：如果本地已存在对应版本的 runtime，构建步骤会自动跳过。
 
 也可以手动构建 OpenClaw runtime：
 
@@ -123,10 +150,10 @@ npm run openclaw:runtime:win-x64
 npm run openclaw:runtime:linux-x64
 ```
 
-如果希望开发启动前自动准备 OpenClaw runtime：
+如需覆盖 OpenClaw 源码路径：
 
 ```bash
-npm run electron:dev:openclaw
+OPENCLAW_SRC=/path/to/openclaw npm run dist:win
 ```
 
 Windows 打包会内置便携 Python 运行时到 `resources/python-win`（安装包资源目录为 `python-win`），终端用户无需手动安装 Python。
@@ -379,6 +406,41 @@ Cowork 会话配置包含：
 ### 国际化
 
 支持中文（默认）和英文两种语言，通过设置面板切换。
+
+## OpenClaw 版本管理
+
+LobsterAI 将 OpenClaw 依赖锁定到指定的 release 版本，在 `package.json` 中声明：
+
+```json
+{
+  "openclaw": {
+    "version": "v2026.3.2",
+    "repo": "https://github.com/openclaw/openclaw.git"
+  }
+}
+```
+
+### 工作原理
+
+| 步骤 | 行为 | 时机 |
+|------|------|------|
+| **版本确认** | 克隆或切换 `../openclaw` 到锁定的 tag | 每次 runtime 构建前 |
+| **构建缓存检查** | 比对锁定版本与 `runtime-build-info.json` | 每次 runtime 构建前 |
+| **完整构建** | `pnpm install` → `build` → `ui:build` → 打包为 asar | 仅版本变更时 |
+
+### 更新 OpenClaw 版本
+
+1. 修改 `package.json` 中 `openclaw.version` 为目标 release tag
+2. 执行 `npm run electron:dev:openclaw` 或 `npm run dist:win` — 新版本会自动拉取并构建
+3. 提交 `package.json` 的变更
+
+### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `OPENCLAW_SRC` | OpenClaw 源码目录路径 | `../openclaw` |
+| `OPENCLAW_FORCE_BUILD` | 设为 `1` 强制重新构建（即使版本匹配） | — |
+| `OPENCLAW_SKIP_ENSURE` | 设为 `1` 跳过自动版本切换 | — |
 
 ## 开发规范
 

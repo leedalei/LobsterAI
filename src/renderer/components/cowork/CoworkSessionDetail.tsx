@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { i18nService } from '../../services/i18n';
@@ -9,11 +9,7 @@ import MarkdownContent from '../MarkdownContent';
 import {
   CheckIcon,
   InformationCircleIcon,
-  PuzzlePieceIcon,
-  EllipsisHorizontalIcon,
-  PencilSquareIcon,
   ShareIcon,
-  TrashIcon,
   ExclamationTriangleIcon,
   ChevronRightIcon,
   PhotoIcon,
@@ -22,6 +18,10 @@ import { FolderIcon } from '@heroicons/react/24/solid';
 import { coworkService } from '../../services/cowork';
 import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import ComposeIcon from '../icons/ComposeIcon';
+import PuzzleIcon from '../icons/PuzzleIcon';
+import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
+import PencilSquareIcon from '../icons/PencilSquareIcon';
+import TrashIcon from '../icons/TrashIcon';
 import WindowTitleBar from '../window/WindowTitleBar';
 import { getCompactFolderName } from '../../utils/path';
 
@@ -891,7 +891,7 @@ const CopyButton: React.FC<{
   );
 };
 
-const UserMessageItem: React.FC<{ message: CoworkMessage; skills: Skill[] }> = ({ message, skills }) => {
+const UserMessageItem: React.FC<{ message: CoworkMessage; skills: Skill[] }> = React.memo(({ message, skills }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
@@ -903,16 +903,6 @@ const UserMessageItem: React.FC<{ message: CoworkMessage; skills: Skill[] }> = (
 
   // Get image attachments from metadata
   const imageAttachments = ((message.metadata as CoworkMessageMetadata)?.imageAttachments ?? []) as CoworkImageAttachment[];
-
-  // Debug: log what we read from metadata for user messages
-  console.log('[UserMessageItem] render', {
-    messageId: message.id,
-    hasMetadata: !!message.metadata,
-    metadataKeys: message.metadata ? Object.keys(message.metadata) : [],
-    imageAttachmentsCount: imageAttachments.length,
-    imageAttachmentsNames: imageAttachments.map(a => a.name),
-    imageAttachmentsBase64Lengths: imageAttachments.map(a => a.base64Data?.length ?? 0),
-  });
 
   return (
     <div
@@ -958,7 +948,7 @@ const UserMessageItem: React.FC<{ message: CoworkMessage; skills: Skill[] }> = (
                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-claude-accent/5 dark:bg-claude-accent/10"
                     title={skill.description}
                   >
-                    <PuzzlePieceIcon className="h-2.5 w-2.5 text-claude-accent/70" />
+                    <PuzzleIcon className="h-2.5 w-2.5 text-claude-accent/70" />
                     <span className="text-[10px] font-medium text-claude-accent/70 max-w-[60px] truncate">
                       {skill.name}
                     </span>
@@ -989,7 +979,7 @@ const UserMessageItem: React.FC<{ message: CoworkMessage; skills: Skill[] }> = (
       )}
     </div>
   );
-};
+});
 
 const AssistantMessageItem: React.FC<{
   message: CoworkMessage;
@@ -1295,10 +1285,10 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   updateBadge,
 }) => {
   const isMac = window.electron.platform === 'darwin';
-  const { currentSession, isStreaming } = useSelector((state: RootState) => state.cowork);
+  const currentSession = useSelector((state: RootState) => state.cowork.currentSession);
+  const isStreaming = useSelector((state: RootState) => state.cowork.isStreaming);
   const skills = useSelector((state: RootState) => state.skill.skills);
   const detailRootRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
@@ -1711,17 +1701,19 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     if (!shouldAutoScroll) {
       return;
     }
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [currentSession?.messages?.length, lastMessageContent, isStreaming, shouldAutoScroll]);
+
+  const messages = currentSession?.messages;
+  const displayItems = useMemo(() => messages ? buildDisplayItems(messages) : [], [messages]);
+  const turns = useMemo(() => buildConversationTurns(displayItems), [displayItems]);
 
   if (!currentSession) {
     return null;
   }
-
-  const displayItems = buildDisplayItems(currentSession.messages);
-  const turns = buildConversationTurns(displayItems);
 
   const renderConversationTurns = () => {
     if (turns.length === 0) {
@@ -1958,7 +1950,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
         className="flex-1 overflow-y-auto min-h-0 pt-3"
       >
         {renderConversationTurns()}
-        <div ref={messagesEndRef} className="h-20" />
+        <div className="h-20" />
       </div>
 
       {/* Streaming Activity Bar */}

@@ -8,7 +8,7 @@ import path from 'path';
 const DEFAULT_OPENCLAW_VERSION = '2026.2.23';
 const DEFAULT_GATEWAY_PORT = 18789;
 const GATEWAY_PORT_SCAN_LIMIT = 80;
-const GATEWAY_BOOT_TIMEOUT_MS = 120 * 1000;
+const GATEWAY_BOOT_TIMEOUT_MS = 180 * 1000;
 const GATEWAY_RESTART_DELAY_MS = 3000;
 
 export type OpenClawEnginePhase =
@@ -268,8 +268,11 @@ export class OpenClawEngineManager extends EventEmitter {
 
   async startGateway(): Promise<OpenClawEngineStatus> {
     this.shutdownRequested = false;
+    const t0 = Date.now();
+    const elapsed = () => `${Date.now() - t0}ms`;
 
     const ensured = await this.ensureReady();
+    console.log(`[OpenClaw] startGateway: ensureReady done (${elapsed()}), phase=${ensured.phase}`);
     if (ensured.phase !== 'ready' && ensured.phase !== 'running') {
       return ensured;
     }
@@ -278,6 +281,7 @@ export class OpenClawEngineManager extends EventEmitter {
       const port = this.gatewayPort ?? this.readGatewayPort();
       if (port) {
         const healthy = await this.isGatewayHealthy(port);
+        console.log(`[OpenClaw] startGateway: existing process health check (${elapsed()}), healthy=${healthy}`);
         if (healthy) {
           if (this.status.phase !== 'running') {
             this.setStatus({
@@ -296,6 +300,7 @@ export class OpenClawEngineManager extends EventEmitter {
     }
 
     const runtime = this.resolveRuntimeMetadata();
+    console.log(`[OpenClaw] startGateway: resolveRuntimeMetadata done (${elapsed()}), root=${runtime.root ? 'found' : 'missing'}`);
     if (!runtime.root) {
       this.setStatus({
         phase: 'not_installed',
@@ -307,8 +312,10 @@ export class OpenClawEngineManager extends EventEmitter {
     }
 
     this.ensureBareEntryFiles(runtime.root);
+    console.log(`[OpenClaw] startGateway: ensureBareEntryFiles done (${elapsed()})`);
 
     const openclawEntry = this.resolveOpenClawEntry(runtime.root);
+    console.log(`[OpenClaw] startGateway: resolveOpenClawEntry done (${elapsed()}), entry=${openclawEntry}`);
     if (!openclawEntry) {
       this.setStatus({
         phase: 'error',
@@ -320,10 +327,13 @@ export class OpenClawEngineManager extends EventEmitter {
     }
 
     const token = this.ensureGatewayToken();
+    console.log(`[OpenClaw] startGateway: ensureGatewayToken done (${elapsed()})`);
     const port = await this.resolveGatewayPort();
+    console.log(`[OpenClaw] startGateway: resolveGatewayPort done (${elapsed()}), port=${port}`);
     this.gatewayPort = port;
     this.writeGatewayPort(port);
     this.ensureConfigFile();
+    console.log(`[OpenClaw] startGateway: pre-fork setup done (${elapsed()})`);
 
     this.setStatus({
       phase: 'starting',
@@ -342,6 +352,7 @@ export class OpenClawEngineManager extends EventEmitter {
       OPENCLAW_GATEWAY_PORT: String(port),
       OPENCLAW_NO_RESPAWN: '1',
       OPENCLAW_ENGINE_VERSION: runtime.version || DEFAULT_OPENCLAW_VERSION,
+      OPENCLAW_BUNDLED_PLUGINS_DIR: path.join(runtime.root, 'extensions'),
     };
 
     const forkArgs = ['gateway', '--bind', 'loopback', '--port', String(port), '--token', token];
@@ -356,6 +367,7 @@ export class OpenClawEngineManager extends EventEmitter {
         serviceName: 'OpenClaw Gateway',
       },
     );
+    console.log(`[OpenClaw] startGateway: utilityProcess.fork() called (${elapsed()})`);
 
     this.gatewayProcess = child;
     this.attachGatewayProcessLogs(child);
@@ -363,10 +375,11 @@ export class OpenClawEngineManager extends EventEmitter {
 
     // Wait for the spawn event to confirm the process started (pid becomes available).
     child.once('spawn', () => {
-      console.log(`[OpenClaw] gateway process spawned, pid=${child.pid}`);
+      console.log(`[OpenClaw] gateway process spawned (${elapsed()}), pid=${child.pid}`);
     });
 
     const ready = await this.waitForGatewayReady(port, GATEWAY_BOOT_TIMEOUT_MS);
+    console.log(`[OpenClaw] startGateway: waitForGatewayReady returned (${elapsed()}), ready=${ready}`);
     if (!ready) {
       this.setStatus({
         phase: 'error',
@@ -378,6 +391,7 @@ export class OpenClawEngineManager extends EventEmitter {
       return this.getStatus();
     }
 
+    console.log(`[OpenClaw] startGateway: gateway is running, total startup time: ${elapsed()}`);
     this.setStatus({
       phase: 'running',
       version: runtime.version,
@@ -538,13 +552,17 @@ export class OpenClawEngineManager extends EventEmitter {
       `// because the drive letter (e.g. "D:") is misinterpreted as a URL scheme.\n` +
       `const { pathToFileURL } = require('node:url');\n` +
       `const path = require('node:path');\n` +
+      `const fs = require('node:fs');\n` +
       `const esmEntry = path.join(__dirname, '${esmBasename}');\n` +
       `// Patch argv so openclaw's isMainModule() recognizes this as the main entry.\n` +
       `// In standard Node.js: process.argv = [execPath, scriptPath, ...args]\n` +
       `// In Electron utilityProcess: process.argv = [execPath, ...args] (no scriptPath)\n` +
       `// We must detect which layout we have to avoid overwriting the 'gateway' command arg.\n` +
+      `// Use fs.realpathSync to resolve symlinks/junctions so that e.g.\n` +
+      `// "...current/gateway-launcher.cjs" (junction) matches "...win-x64/gateway-launcher.cjs".\n` +
+      `const _realpath = (p) => { try { return fs.realpathSync(path.resolve(p)); } catch { return path.resolve(p); } };\n` +
       `const _launcherInArgv = process.argv[1] &&\n` +
-      `  path.resolve(process.argv[1]).toLowerCase() === path.resolve(__filename).toLowerCase();\n` +
+      `  _realpath(process.argv[1]).toLowerCase() === _realpath(__filename).toLowerCase();\n` +
       `if (_launcherInArgv) {\n` +
       `  process.argv[1] = esmEntry;\n` +
       `} else {\n` +
@@ -738,22 +756,28 @@ export class OpenClawEngineManager extends EventEmitter {
       `http://127.0.0.1:${port}/`,
     ];
 
-    for (const url of probeUrls) {
+    // Run all HTTP probes in parallel and resolve as soon as any succeeds.
+    // Previously these ran sequentially, costing up to 4*1200ms per tick.
+    const httpProbes = probeUrls.map(async (url) => {
       try {
-        const response = await fetchWithTimeout(url, 1200);
-        if (response.status < 500) {
-          return true;
-        }
+        const response = await fetchWithTimeout(url, 1500);
+        if (response.status < 500) return true;
       } catch {
-        // try next probe URL
+        // probe failed
       }
-    }
+      return false;
+    });
 
-    return await isPortReachable('127.0.0.1', port, 1000);
+    // Also probe TCP reachability in parallel as fallback.
+    const tcpProbe = isPortReachable('127.0.0.1', port, 1500);
+
+    const results = await Promise.all([...httpProbes, tcpProbe]);
+    return results.some(Boolean);
   }
 
   private waitForGatewayReady(port: number, timeoutMs: number): Promise<boolean> {
     const startedAt = Date.now();
+    let pollCount = 0;
     return new Promise((resolve) => {
       const tick = async () => {
         if (this.shutdownRequested) {
@@ -768,17 +792,34 @@ export class OpenClawEngineManager extends EventEmitter {
           return;
         }
 
+        pollCount += 1;
+        const elapsedMs = Date.now() - startedAt;
+
         const healthy = await this.isGatewayHealthy(port);
         if (healthy) {
-          console.log(`[OpenClaw] waitForGatewayReady: gateway healthy after ${Date.now() - startedAt}ms`);
+          console.log(`[OpenClaw] waitForGatewayReady: gateway healthy after ${elapsedMs}ms (${pollCount} polls)`);
           resolve(true);
           return;
         }
 
-        if (Date.now() - startedAt >= timeoutMs) {
-          console.log(`[OpenClaw] waitForGatewayReady: timed out after ${timeoutMs}ms`);
+        if (elapsedMs >= timeoutMs) {
+          console.log(`[OpenClaw] waitForGatewayReady: timed out after ${timeoutMs}ms (${pollCount} polls)`);
           resolve(false);
           return;
+        }
+
+        // Update progress from 10% → 90% during the wait, so the UI shows meaningful feedback.
+        const progress = Math.min(90, 10 + Math.round((elapsedMs / timeoutMs) * 80));
+        this.setStatus({
+          phase: 'starting',
+          version: this.status.version,
+          progressPercent: progress,
+          message: `Starting OpenClaw gateway... (${Math.round(elapsedMs / 1000)}s)`,
+          canRetry: false,
+        });
+
+        if (pollCount % 5 === 0) {
+          console.log(`[OpenClaw] waitForGatewayReady: poll #${pollCount}, elapsed=${elapsedMs}ms, progress=${progress}%`);
         }
 
         setTimeout(() => {

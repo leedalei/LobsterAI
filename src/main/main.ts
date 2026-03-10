@@ -599,24 +599,32 @@ const bootstrapOpenClawEngine = async (options: { forceReinstall?: boolean; reas
 
   const task = async (): Promise<OpenClawEngineStatus> => {
     const reason = options.reason || 'unknown';
+    const t0 = Date.now();
+    const elapsed = () => `${Date.now() - t0}ms`;
     try {
+      console.log(`[OpenClaw] bootstrap starting (reason=${reason})`);
       const syncResult = await syncOpenClawConfig({
         reason: `bootstrap:${reason}`,
         restartGatewayIfRunning: false,
       });
+      console.log(`[OpenClaw] bootstrap: syncOpenClawConfig done (${elapsed()}), success=${syncResult.success}`);
       if (!syncResult.success) {
         return syncResult.status || manager.getStatus();
       }
       if (options.forceReinstall) {
         await manager.stopGateway();
+        console.log(`[OpenClaw] bootstrap: stopGateway done (${elapsed()})`);
       }
       const ensuredStatus = await manager.ensureReady();
+      console.log(`[OpenClaw] bootstrap: ensureReady done (${elapsed()}), phase=${ensuredStatus.phase}`);
       if (ensuredStatus.phase !== 'ready' && ensuredStatus.phase !== 'running') {
         return ensuredStatus;
       }
-      return await manager.startGateway();
+      const result = await manager.startGateway();
+      console.log(`[OpenClaw] bootstrap completed (${elapsed()}), phase=${result.phase}`);
+      return result;
     } catch (error) {
-      console.error(`[OpenClaw] bootstrap failed (${reason}):`, error);
+      console.error(`[OpenClaw] bootstrap failed (${reason}, ${elapsed()}):`, error);
       return manager.getStatus();
     }
   };
@@ -667,6 +675,30 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
       getTelegramOpenClawConfig: () => {
         try {
           return getIMGatewayManager()?.getConfig()?.telegram ?? null;
+      getDingTalkConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().dingtalk;
+        } catch {
+          return null;
+        }
+      },
+      getFeishuConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().feishu;
+        } catch {
+          return null;
+        }
+      },
+      getQQConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().qq;
+        } catch {
+          return null;
+        }
+      },
+      getWecomConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().wecom;
         } catch {
           return null;
         }
@@ -1686,6 +1718,19 @@ if (!gotTheLock) {
     }
   });
 
+  ipcMain.handle('cowork:session:deleteBatch', async (_event, sessionIds: string[]) => {
+    try {
+      const coworkStoreInstance = getCoworkStore();
+      coworkStoreInstance.deleteSessions(sessionIds);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to batch delete sessions',
+      };
+    }
+  });
+
   ipcMain.handle('cowork:session:pin', async (_event, options: { sessionId: string; pinned: boolean }) => {
     try {
       const coworkStoreInstance = getCoworkStore();
@@ -2247,6 +2292,22 @@ if (!gotTheLock) {
         }
       }
 
+      // Re-sync OpenClaw config so dingtalk-connector picks up new credentials
+      if (config.dingtalk) {
+        void syncOpenClawConfig({ reason: 'im-dingtalk-config-change', restartGatewayIfRunning: false });
+      }
+      // Re-sync OpenClaw config so feishu-openclaw-plugin picks up new credentials
+      if (config.feishu) {
+        void syncOpenClawConfig({ reason: 'im-feishu-config-change', restartGatewayIfRunning: false });
+      }
+      // Re-sync OpenClaw config so qqbot plugin picks up new credentials
+      if (config.qq) {
+        void syncOpenClawConfig({ reason: 'im-qq-config-change', restartGatewayIfRunning: false });
+      }
+      // Re-sync OpenClaw config so wecom-openclaw-plugin picks up new credentials
+      if (config.wecom) {
+        void syncOpenClawConfig({ reason: 'im-wecom-config-change', restartGatewayIfRunning: false });
+      }
       return { success: true };
     } catch (error) {
       return {

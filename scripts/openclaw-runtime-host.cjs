@@ -32,6 +32,7 @@ const result = spawnSync(npmBin, ['run', `openclaw:runtime:${targetId}`], {
   cwd: rootDir,
   env: process.env,
   stdio: 'inherit',
+  shell: true,
 });
 
 if (typeof result.status === 'number') {

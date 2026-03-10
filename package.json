@@ -6,7 +6,33 @@
     "email": "lobsterai.project@rd.netease.com"
   },
   "license": "MIT",
-  "version": "0.2.0",
+  "version": "0.2.2",
+  "openclaw": {
+    "version": "v2026.3.2",
+    "repo": "https://github.com/openclaw/openclaw.git",
+    "plugins": [
+      {
+        "id": "dingtalk-connector",
+        "npm": "@dingtalk-real-ai/dingtalk-connector",
+        "version": "0.7.3"
+      },
+      {
+        "id": "feishu-openclaw-plugin",
+        "npm": "@larksuiteoapi/feishu-openclaw-plugin",
+        "version": "2026.3.8"
+      },
+      {
+        "id": "qqbot",
+        "npm": "@sliverp/qqbot",
+        "version": "1.5.3"
+      },
+      {
+        "id": "wecom-openclaw-plugin",
+        "npm": "@wecom/wecom-openclaw-plugin",
+        "version": "1.0.6"
+      }
+    ]
+  },
   "main": "dist-electron/main.js",
   "engines": {
     "node": ">=24 <25"
@@ -44,13 +70,15 @@
     "generate:tray-icons": "node scripts/generate-tray-icons.js",
     "setup:mingit": "node scripts/setup-mingit.js",
     "setup:python-runtime": "node scripts/setup-python-runtime.js",
+    "openclaw:ensure": "node scripts/ensure-openclaw-version.cjs",
+    "openclaw:plugins": "node scripts/ensure-openclaw-plugins.cjs",
     "openclaw:runtime:host": "node scripts/openclaw-runtime-host.cjs",
-    "openclaw:runtime:mac-arm64": "node scripts/run-build-openclaw-runtime.cjs mac-arm64 && node scripts/sync-openclaw-runtime-current.cjs mac-arm64",
-    "openclaw:runtime:mac-x64": "node scripts/run-build-openclaw-runtime.cjs mac-x64 && node scripts/sync-openclaw-runtime-current.cjs mac-x64",
-    "openclaw:runtime:win-x64": "node scripts/run-build-openclaw-runtime.cjs win-x64 && node scripts/sync-openclaw-runtime-current.cjs win-x64",
-    "openclaw:runtime:win-arm64": "node scripts/run-build-openclaw-runtime.cjs win-arm64 && node scripts/sync-openclaw-runtime-current.cjs win-arm64",
-    "openclaw:runtime:linux-x64": "node scripts/run-build-openclaw-runtime.cjs linux-x64 && node scripts/sync-openclaw-runtime-current.cjs linux-x64",
-    "openclaw:runtime:linux-arm64": "node scripts/run-build-openclaw-runtime.cjs linux-arm64 && node scripts/sync-openclaw-runtime-current.cjs linux-arm64",
+    "openclaw:runtime:mac-arm64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs mac-arm64 && node scripts/sync-openclaw-runtime-current.cjs mac-arm64 && npm run openclaw:plugins",
+    "openclaw:runtime:mac-x64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs mac-x64 && node scripts/sync-openclaw-runtime-current.cjs mac-x64 && npm run openclaw:plugins",
+    "openclaw:runtime:win-x64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs win-x64 && node scripts/sync-openclaw-runtime-current.cjs win-x64 && npm run openclaw:plugins",
+    "openclaw:runtime:win-arm64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs win-arm64 && node scripts/sync-openclaw-runtime-current.cjs win-arm64 && npm run openclaw:plugins",
+    "openclaw:runtime:linux-x64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs linux-x64 && node scripts/sync-openclaw-runtime-current.cjs linux-x64 && npm run openclaw:plugins",
+    "openclaw:runtime:linux-arm64": "npm run openclaw:ensure && node scripts/run-build-openclaw-runtime.cjs linux-arm64 && node scripts/sync-openclaw-runtime-current.cjs linux-arm64 && npm run openclaw:plugins",
     "regenerate:icon": "bash scripts/regenerate-mac-icon.sh",
     "fix:mac-icon": "bash scripts/fix-mac-icon-display.sh"
   },
@@ -63,6 +91,7 @@
     "@larksuiteoapi/node-sdk": "^1.58.0",
     "@reduxjs/toolkit": "^2.2.1",
     "@types/uuid": "^10.0.0",
+    "@wecom/aibot-node-sdk": "^1.0.0",
     "bufferutil": "^4.1.0",
     "cron-parser": "^5.5.0",
     "dingtalk-stream": "^2.1.4",
@@ -75,9 +104,9 @@
     "js-yaml": "^4.1.1",
     "katex": "^0.16.21",
     "mermaid": "^10.9.5",
-    "nim-web-sdk-ng": "10.9.77-alpha.2",
-    "node-nim": "^10.9.76",
+    "nim-web-sdk-ng": "10.9.77-alpha.4",
     "npm": "^11.11.0",
+    "qq-official-bot": "^1.0.12",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.0.0",
