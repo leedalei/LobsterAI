@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { RootState } from './store';
+import { RootState, store } from './store';
 import Settings, { type SettingsOpenOptions } from './components/Settings';
 import Sidebar from './components/Sidebar';
 import Toast from './components/Toast';
@@ -19,6 +19,7 @@ import { authService } from './services/auth';
 import { scheduledTaskService } from './services/scheduledTask';
 import { checkForAppUpdate, type AppUpdateInfo, type AppUpdateDownloadProgress, UPDATE_POLL_INTERVAL_MS, UPDATE_HEARTBEAT_INTERVAL_MS } from './services/appUpdate';
 import { defaultConfig } from './config';
+import { BUILTIN_FREE_MODEL } from './config';
 import { setAvailableModels, setSelectedModel } from './store/slices/modelSlice';
 import { clearSelection } from './store/slices/quickActionSlice';
 import type { ApiConfig } from './services/api';
@@ -108,12 +109,19 @@ const App: React.FC = () => {
           supportsImage: model.supportsImage ?? false,
         }));
         const resolvedModels = providerModels.length > 0 ? providerModels : fallbackModels;
-        if (resolvedModels.length > 0) {
-          dispatch(setAvailableModels(resolvedModels));
-          const preferredModel = resolvedModels.find(
+
+        // If user is logged in, prepend the built-in free model
+        const authState = store.getState().auth;
+        const modelsWithFree = authState.isLoggedIn
+          ? [BUILTIN_FREE_MODEL, ...resolvedModels]
+          : resolvedModels;
+
+        if (modelsWithFree.length > 0) {
+          dispatch(setAvailableModels(modelsWithFree));
+          const preferredModel = modelsWithFree.find(
             model => model.id === config.model.defaultModel
               && (!config.model.defaultModelProvider || model.providerKey === config.model.defaultModelProvider)
-          ) ?? resolvedModels[0];
+          ) ?? modelsWithFree[0];
           dispatch(setSelectedModel(preferredModel));
         }
         

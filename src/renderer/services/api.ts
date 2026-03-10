@@ -1,6 +1,7 @@
 import { store } from '../store';
 import { configService } from './config';
 import { ChatMessagePayload, ChatUserMessageInput, ImageAttachment } from '../types/chat';
+import { authService } from './auth';
 
 const ZHIPU_CODING_PLAN_OPENAI_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4';
 const ZHIPU_CODING_PLAN_ANTHROPIC_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
@@ -378,6 +379,12 @@ class ApiService {
     }
 
     const selectedModel = store.getState().model.selectedModel;
+
+    // Proxy mode: if the selected model is the built-in free model
+    if (selectedModel.providerKey === 'lobsterai-proxy') {
+      return this.chatWithProxy(message, onProgress, history, selectedModel.id);
+    }
+
     const provider = this.detectProvider(
       selectedModel.id,
       selectedModel.providerKey ?? selectedModel.provider
@@ -791,6 +798,158 @@ class ApiService {
         throw error;
       }
       throw new ApiError('An unexpected error occurred while calling the API. Please try again.');
+    }
+  }
+
+  /**
+   * Proxy mode: route request through the LobsterAI backend proxy.
+   * Uses OpenAI-compatible format with Bearer token authentication.
+   */
+  private async chatWithProxy(
+    message: string | ChatUserMessageInput,
+    onProgress?: (content: string, reasoning?: string) => void,
+    history: ChatMessagePayload[] = [],
+    modelId: string = 'qwen-3.5',
+  ): Promise<{ content: string; reasoning?: string }> {
+    const accessToken = await authService.getAccessToken();
+    if (!accessToken) {
+      throw new ApiError('LOGIN_REQUIRED');
+    }
+
+    // Get server base URL from app config
+    const appConfig = configService.getConfig();
+    const serverBaseUrl = (appConfig as any).server?.baseUrl || 'https://api.lobsterai.com';
+    const proxyUrl = `${serverBaseUrl}/api/proxy/chat/completions`;
+
+    const proxyConfig: ApiConfig = {
+      apiKey: accessToken,
+      baseUrl: proxyUrl,
+      provider: 'lobsterai-proxy',
+      apiFormat: 'openai',
+    };
+
+    const userMessage: ChatUserMessageInput = typeof message === 'string'
+      ? { content: message }
+      : { content: message.content || '', images: message.images };
+
+    // Reuse the OpenAI-compatible chat method, but override the URL building
+    let fullContent = '';
+    let fullReasoning = '';
+
+    try {
+      this.cancelOngoingRequest();
+      const requestId = generateRequestId();
+      this.currentRequestId = requestId;
+
+      const formattedMessages = [
+        ...history,
+        { role: 'user' as const, content: userMessage.content, images: userMessage.images },
+      ]
+        .map(item => this.formatOpenAIMessage(item, false))
+        .filter(Boolean);
+
+      return new Promise((resolve, reject) => {
+        let aborted = false;
+        let sseBuffer = '';
+
+        const removeDataListener = window.electron.api.onStreamData(requestId, (chunk) => {
+          sseBuffer += chunk;
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, '');
+            if (!line || !line.startsWith('data: ')) continue;
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta || {};
+              const content = typeof delta.content === 'string' ? delta.content : '';
+              const reasoning = typeof delta.reasoning_content === 'string'
+                ? delta.reasoning_content
+                : '';
+
+              if (content) fullContent += content;
+              if (reasoning) fullReasoning += reasoning;
+              if (content || reasoning) {
+                onProgress?.(fullContent, fullReasoning || undefined);
+              }
+            } catch (e) {
+              console.warn('Failed to parse proxy SSE message:', e);
+            }
+          }
+        });
+
+        const removeDoneListener = window.electron.api.onStreamDone(requestId, () => {
+          this.cleanup();
+          if (!fullContent) {
+            reject(new ApiError('No content received from the proxy API. Please try again.'));
+          } else {
+            resolve({ content: fullContent, reasoning: fullReasoning || undefined });
+          }
+        });
+
+        const removeErrorListener = window.electron.api.onStreamError(requestId, (error) => {
+          this.cleanup();
+          reject(new ApiError(error));
+        });
+
+        const removeAbortListener = window.electron.api.onStreamAbort(requestId, () => {
+          aborted = true;
+          this.cleanup();
+          resolve({ content: fullContent || 'Response was stopped.', reasoning: fullReasoning || undefined });
+        });
+
+        this.cleanupFunctions = [removeDataListener, removeDoneListener, removeErrorListener, removeAbortListener];
+
+        window.electron.api.stream({
+          url: proxyUrl,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: formattedMessages,
+            stream: true,
+          }),
+          requestId,
+        }).then((response) => {
+          if (!response.ok && !aborted) {
+            this.cleanup();
+            if (response.status === 402) {
+              reject(new ApiError('QUOTA_EXHAUSTED', 402));
+              return;
+            }
+            let errorMessage = 'Proxy API request failed';
+            if (response.error) {
+              try {
+                const errorData = JSON.parse(response.error);
+                if (errorData.error?.message) {
+                  errorMessage = errorData.error.message;
+                }
+              } catch {
+                errorMessage = response.error;
+              }
+            }
+            reject(new ApiError(errorMessage, response.status));
+          }
+        }).catch((error) => {
+          if (!aborted) {
+            this.cleanup();
+            reject(new ApiError(error.message || 'Network error'));
+          }
+        });
+      });
+    } catch (error) {
+      this.cleanup();
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('An unexpected error occurred while calling the proxy API. Please try again.');
     }
   }
 }

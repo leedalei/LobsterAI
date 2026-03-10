@@ -423,6 +423,16 @@ export const CONFIG_KEYS = {
   SKILLS: 'skills',
 };
 
+// 内置免费模型（登录后可用）
+export const BUILTIN_FREE_MODEL = {
+  id: 'qwen-3.5',
+  name: 'Qwen 3.5 (Free)',
+  provider: 'LobsterAI',
+  providerKey: 'lobsterai-proxy',
+  supportsImage: false,
+  isFree: true,
+};
+
 // 模型提供商分类
 export const CHINA_PROVIDERS = ['deepseek', 'moonshot', 'qwen', 'zhipu', 'minimax', 'volcengine', 'youdaozhiyun', 'stepfun', 'xiaomi', 'ollama', 'custom'] as const;
 export const GLOBAL_PROVIDERS = ['openai', 'gemini', 'anthropic', 'openrouter'] as const;

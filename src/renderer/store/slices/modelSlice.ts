@@ -7,6 +7,7 @@ export interface Model {
   provider?: string; // 模型所属的提供商
   providerKey?: string; // 模型所属的提供商 key（用于唯一标识）
   supportsImage?: boolean;
+  isFree?: boolean; // 内置免费模型标识
 }
 
 export function getModelIdentityKey(model: Pick<Model, 'id' | 'providerKey'>): string {
