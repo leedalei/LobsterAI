@@ -2,7 +2,7 @@
  * Screenshot capture module for LobsterAI.
  *
  * Multi-display support:
- *   1. Capture each display silently (macOS: screencapture -x -R, Windows: desktopCapturer)
+ *   1. Capture each display via desktopCapturer (cross-platform, inherits app permissions)
  *   2. Show a frameless overlay window on EACH display with its screenshot as background
  *   3. User can draw/adjust selection on any display; confirm/cancel closes all overlays
  *   4. Crop the full-resolution image from the selected display and save
@@ -11,14 +11,12 @@
 import {
   BrowserWindow,
   desktopCapturer,
-  nativeImage,
   screen,
   app,
   systemPreferences,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { exec } from 'child_process';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,7 +47,6 @@ interface OverlaySelectionResult {
 
 const SCREENSHOT_DIR_NAME = 'screenshots';
 const HIDE_WINDOW_DELAY_MS = 400;
-const SCREENCAPTURE_TIMEOUT_MS = 30_000;
 const OVERLAY_JPEG_QUALITY = 80;
 
 let captureInProgress = false;
@@ -81,34 +78,10 @@ function buildFilePath(dir: string): { filePath: string; fileName: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Per-display screen capture
+// Screen capture via desktopCapturer (cross-platform)
 // ---------------------------------------------------------------------------
 
-function captureDisplayMacOS(display: Electron.Display): Promise<Electron.NativeImage | null> {
-  const { x, y, width, height } = display.bounds;
-  const tmpPath = path.join(app.getPath('temp'), `lobsterai-cap-${Date.now()}-${display.id}.png`);
-  return new Promise((resolve) => {
-    // -x: silent, -R x,y,w,h: capture specific region (global coords)
-    exec(`screencapture -x -R ${x},${y},${width},${height} "${tmpPath}"`, {
-      timeout: SCREENCAPTURE_TIMEOUT_MS,
-    }, (error) => {
-      if (error || !fs.existsSync(tmpPath)) {
-        resolve(null);
-        return;
-      }
-      try {
-        const buf = fs.readFileSync(tmpPath);
-        resolve(nativeImage.createFromBuffer(buf));
-      } catch {
-        resolve(null);
-      } finally {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      }
-    });
-  });
-}
-
-async function captureAllDisplaysWindows(
+async function captureAllDisplays(
   displays: Electron.Display[],
 ): Promise<(Electron.NativeImage | null)[]> {
   // Request a large enough thumbnail to cover the highest-res display.
@@ -119,6 +92,16 @@ async function captureAllDisplaysWindows(
     types: ['screen'],
     thumbnailSize: { width: maxPhysW, height: maxPhysH },
   });
+
+  console.log(`[Screenshot] ${displays.length} displays, ${sources.length} sources, requested ${maxPhysW}x${maxPhysH}`);
+  for (let si = 0; si < sources.length; si++) {
+    const sz = sources[si].thumbnail.getSize();
+    console.log(`[Screenshot]   source[${si}]: id=${sources[si].display_id}, name=${sources[si].name}, thumbnail=${sz.width}x${sz.height}, empty=${sources[si].thumbnail.isEmpty()}`);
+  }
+  for (let di = 0; di < displays.length; di++) {
+    const d = displays[di];
+    console.log(`[Screenshot]   display[${di}]: id=${d.id}, bounds=${JSON.stringify(d.bounds)}, workArea=${JSON.stringify(d.workArea)}, scaleFactor=${d.scaleFactor}`);
+  }
 
   const result: (Electron.NativeImage | null)[] = new Array(displays.length).fill(null);
   const usedSourceIdx = new Set<number>();
@@ -179,6 +162,7 @@ function showOverlaysOnAllDisplays(
 ): Promise<OverlaySelectionResult> {
   return new Promise((resolve) => {
     const windows: BrowserWindow[] = [];
+    const tmpHtmlPaths: string[] = [];
     let settled = false;
     let loadedCount = 0;
 
@@ -186,8 +170,11 @@ function showOverlaysOnAllDisplays(
       if (settled) return;
       settled = true;
       for (const w of windows) {
-        // Use destroy() instead of close() to avoid macOS Space-switching animation
         try { if (!w.isDestroyed()) w.destroy(); } catch { /* ignore */ }
+      }
+      // Clean up temp HTML files
+      for (const p of tmpHtmlPaths) {
+        try { fs.unlinkSync(p); } catch { /* ignore */ }
       }
       resolve(result);
     };
@@ -269,7 +256,11 @@ function showOverlaysOnAllDisplays(
       });
 
       const html = buildOverlayHtml(bgDataUrls[i]);
-      win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const tmpHtmlPath = path.join(app.getPath('temp'), `lobsterai-overlay-${Date.now()}-${i}.html`);
+      fs.writeFileSync(tmpHtmlPath, html, 'utf-8');
+      tmpHtmlPaths.push(tmpHtmlPath);
+      console.log(`[Screenshot] overlay[${i}] loading from temp file: ${tmpHtmlPath} (${html.length} bytes)`);
+      win.loadFile(tmpHtmlPath);
 
       win.webContents.on('did-finish-load', () => {
         if (!settled && !win.isDestroyed()) {
@@ -299,6 +290,7 @@ export async function captureScreenshot(
     // 0. Check macOS screen recording permission
     if (process.platform === 'darwin') {
       const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log(`[Screenshot] macOS screen permission: ${status}`);
       if (status !== 'granted') {
         return { success: false, error: 'screen_permission_denied' };
       }
@@ -315,20 +307,25 @@ export async function captureScreenshot(
     ensureDir(dir);
     const { filePath, fileName } = buildFilePath(dir);
 
-    // 3. Capture every display in parallel
+    // 3. Capture every display via desktopCapturer (cross-platform)
     const displays = screen.getAllDisplays();
-    let images: (Electron.NativeImage | null)[];
-
-    if (process.platform === 'darwin') {
-      images = await Promise.all(displays.map((d) => captureDisplayMacOS(d)));
-    } else if (process.platform === 'win32') {
-      images = await captureAllDisplaysWindows(displays);
-    } else {
-      images = displays.map((): Electron.NativeImage | null => null);
-    }
+    console.log(`[Screenshot] platform=${process.platform}, displays=${displays.length}`);
+    const images = await captureAllDisplays(displays);
 
     if (images.every((img) => !img || img.isEmpty())) {
+      console.error('[Screenshot] All display captures failed or returned empty images');
       return { success: false, error: 'Failed to capture screen' };
+    }
+
+    // Log capture results
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (img && !img.isEmpty()) {
+        const sz = img.getSize();
+        console.log(`[Screenshot] display[${i}] image: ${sz.width}x${sz.height}`);
+      } else {
+        console.warn(`[Screenshot] display[${i}] image: null or empty`);
+      }
     }
 
     // 4. Compute overlay bounds per display.
@@ -349,6 +346,7 @@ export async function captureScreenshot(
         return 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=';
       }
       const { width: lw, height: lh } = d.size; // logical bounds size
+      console.log(`[Screenshot] bgUrl[${i}] resize to ${lw}x${lh}, overlay bounds=${JSON.stringify(overlayBounds[i])}`);
       const resized = img.resize({ width: lw, height: lh });
 
       if (isWindows) {
@@ -364,7 +362,9 @@ export async function captureScreenshot(
         return `data:image/jpeg;base64,${waCropped.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
       }
 
-      return `data:image/jpeg;base64,${resized.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
+      const jpegUrl = `data:image/jpeg;base64,${resized.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
+      console.log(`[Screenshot] bgUrl[${i}] length: ${jpegUrl.length}`);
+      return jpegUrl;
     });
 
     // 6. Determine which display the main window is on
@@ -403,17 +403,30 @@ export async function captureScreenshot(
     }
 
     // 10. Crop from full-resolution image.
-    //     On Windows the overlay covers workArea, so selection coords are relative
-    //     to workArea origin.  Offset them to get position in the full capture.
-    let finalX = rx;
-    let finalY = ry;
+    //     The overlay sends raw CSS coordinates relative to the overlay window.
+    //     Compute scale from actual capture image size vs overlay (display) bounds,
+    //     because desktopCapturer thumbnail resolution may not match display.bounds * scaleFactor
+    //     (e.g. non-Retina external display connected to a Retina MacBook).
+    const imgSize = fullImg.getSize();
+    const ob = overlayBounds[result.displayIndex];
+    const scaleX = imgSize.width / ob.width;
+    const scaleY = imgSize.height / ob.height;
+    console.log(`[Screenshot] crop: imgSize=${imgSize.width}x${imgSize.height}, overlayBounds=${ob.width}x${ob.height}, scale=${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+
+    let cssX = rx;
+    let cssY = ry;
     if (isWindows) {
+      // On Windows, overlay covers workArea; offset to full capture image coordinates
       const d = displays[result.displayIndex];
-      const sf = d.scaleFactor;
-      finalX += Math.round((d.workArea.x - d.bounds.x) * sf);
-      finalY += Math.round((d.workArea.y - d.bounds.y) * sf);
+      cssX += d.workArea.x - d.bounds.x;
+      cssY += d.workArea.y - d.bounds.y;
     }
-    const cropped = fullImg.crop({ x: finalX, y: finalY, width: rw, height: rh });
+    const finalX = Math.round(cssX * scaleX);
+    const finalY = Math.round(cssY * scaleY);
+    const finalW = Math.round(rw * scaleX);
+    const finalH = Math.round(rh * scaleY);
+    console.log(`[Screenshot] crop: css=(${cssX},${cssY},${rw},${rh}) -> final=(${finalX},${finalY},${finalW},${finalH})`);
+    const cropped = fullImg.crop({ x: finalX, y: finalY, width: finalW, height: finalH });
     const pngBuf = cropped.toPNG();
     fs.writeFileSync(filePath, pngBuf);
 
@@ -428,6 +441,7 @@ export async function captureScreenshot(
       error: error instanceof Error ? error.message : 'Screenshot failed',
     };
   } finally {
+    console.log('[Screenshot] captureScreenshot finished');
     captureInProgress = false;
   }
 }
@@ -601,7 +615,8 @@ BC.addEventListener('click',function(){out({confirmed:false})});
 function doOK(){
   if(!sel||ph!=='done'){out({confirmed:false});return}
   var n=nm(sel);
-  out({confirmed:true,rect:{x:Math.round(n.x*D),y:Math.round(n.y*D),width:Math.round(n.w*D),height:Math.round(n.h*D)}})
+  // Send raw CSS coordinates — main process will scale using actual image dimensions
+  out({confirmed:true,rect:{x:Math.round(n.x),y:Math.round(n.y),width:Math.round(n.w),height:Math.round(n.h)}})
 }
 
 ic();
