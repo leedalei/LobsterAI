@@ -137,6 +137,7 @@ function showOverlaysOnAllDisplays(
   displays: Electron.Display[],
   bgDataUrls: string[],
   activeDisplayIndex: number,
+  overlayBounds: Electron.Rectangle[],
 ): Promise<OverlaySelectionResult> {
   return new Promise((resolve) => {
     const windows: BrowserWindow[] = [];
@@ -173,8 +174,8 @@ function showOverlaysOnAllDisplays(
     };
 
     for (let i = 0; i < displays.length; i++) {
-      const { x, y, width, height } = displays[i].bounds;
-      const isWindows = process.platform === 'win32';
+      const { x, y, width, height } = overlayBounds[i];
+      const isMac = process.platform === 'darwin';
 
       const win = new BrowserWindow({
         x,
@@ -182,17 +183,19 @@ function showOverlaysOnAllDisplays(
         width,
         height,
         frame: false,
-        // Windows: kiosk covers the entire screen including taskbar.
-        // macOS: NO kiosk/fullscreen — they conflict across multiple displays (Spaces).
-        //        Instead use frameless + screen-saver level + enableLargerThanScreen.
-        kiosk: isWindows,
+        // No kiosk/fullscreen on any platform:
+        //   macOS: conflicts with Spaces across multiple displays.
+        //   Windows: kiosk forces all windows to the primary display.
+        // Instead: frameless + alwaysOnTop + correct bounds per display.
+        // On Windows, overlayBounds = workArea (excludes taskbar).
+        // On macOS, overlayBounds = bounds (full screen).
         skipTaskbar: true,
         resizable: false,
         movable: false,
         minimizable: false,
         maximizable: false,
         hasShadow: false,
-        enableLargerThanScreen: !isWindows,
+        enableLargerThanScreen: isMac,
         show: false,
         webPreferences: {
           nodeIntegration: false,
@@ -202,7 +205,7 @@ function showOverlaysOnAllDisplays(
       });
 
       win.setAlwaysOnTop(true, 'screen-saver');
-      if (!isWindows) {
+      if (isMac) {
         // macOS only: prevent creating a new Space for the window
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       }
@@ -285,19 +288,43 @@ export async function captureScreenshot(
       return { success: false, error: 'Failed to capture screen' };
     }
 
-    // 4. Downscale each display to a JPEG data URL for overlay background.
+    // 4. Compute overlay bounds per display.
+    //    Windows: use workArea (excludes taskbar) — avoids taskbar coverage issues
+    //             and kiosk mode that forces all windows to the primary display.
+    //    macOS:   use full bounds (overlay covers entire screen including menu bar).
+    const isWindows = process.platform === 'win32';
+    const overlayBounds: Electron.Rectangle[] = displays.map((d) =>
+      isWindows ? d.workArea : d.bounds,
+    );
+
+    // 5. Downscale each display to a JPEG data URL for overlay background.
     //    Use logical resolution (not Retina physical) to keep data size manageable.
+    //    On Windows, crop to workArea portion so background matches the overlay exactly.
     const bgUrls: string[] = displays.map((d, i) => {
       const img = images[i];
       if (!img || img.isEmpty()) {
         return 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=';
       }
-      const { width: lw, height: lh } = d.size;
+      const { width: lw, height: lh } = d.size; // logical bounds size
       const resized = img.resize({ width: lw, height: lh });
+
+      if (isWindows) {
+        // Crop out the taskbar region — keep only the workArea portion
+        const ob = overlayBounds[i];
+        const b = d.bounds;
+        const waCropped = resized.crop({
+          x: ob.x - b.x,
+          y: ob.y - b.y,
+          width: ob.width,
+          height: ob.height,
+        });
+        return `data:image/jpeg;base64,${waCropped.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
+      }
+
       return `data:image/jpeg;base64,${resized.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
     });
 
-    // 5. Determine which display the main window is on
+    // 6. Determine which display the main window is on
     let activeDisplayIndex = 0;
     if (mainWindow && !mainWindow.isDestroyed()) {
       const appDisplay = screen.getDisplayMatching(mainWindow.getBounds());
@@ -305,10 +332,10 @@ export async function captureScreenshot(
       if (idx >= 0) activeDisplayIndex = idx;
     }
 
-    // 6. Show overlays on ALL displays
-    const result = await showOverlaysOnAllDisplays(displays, bgUrls, activeDisplayIndex);
+    // 7. Show overlays on ALL displays
+    const result = await showOverlaysOnAllDisplays(displays, bgUrls, activeDisplayIndex, overlayBounds);
 
-    // 7. Restore main window
+    // 8. Restore main window
     if (hideWindow && mainWindow) {
       mainWindow.show();
       mainWindow.focus();
@@ -323,7 +350,7 @@ export async function captureScreenshot(
       return { success: false, error: 'cancelled' };
     }
 
-    // 8. Release NativeImages for non-selected displays to reduce peak memory
+    // 9. Release NativeImages for non-selected displays to reduce peak memory
     const fullImg = images[result.displayIndex];
     for (let i = 0; i < images.length; i++) {
       if (i !== result.displayIndex) images[i] = null;
@@ -332,8 +359,18 @@ export async function captureScreenshot(
       return { success: false, error: 'Failed to capture selected display' };
     }
 
-    // 8. Crop from full-resolution image
-    const cropped = fullImg.crop({ x: rx, y: ry, width: rw, height: rh });
+    // 10. Crop from full-resolution image.
+    //     On Windows the overlay covers workArea, so selection coords are relative
+    //     to workArea origin.  Offset them to get position in the full capture.
+    let finalX = rx;
+    let finalY = ry;
+    if (isWindows) {
+      const d = displays[result.displayIndex];
+      const sf = d.scaleFactor;
+      finalX += Math.round((d.workArea.x - d.bounds.x) * sf);
+      finalY += Math.round((d.workArea.y - d.bounds.y) * sf);
+    }
+    const cropped = fullImg.crop({ x: finalX, y: finalY, width: rw, height: rh });
     const pngBuf = cropped.toPNG();
     fs.writeFileSync(filePath, pngBuf);
 
