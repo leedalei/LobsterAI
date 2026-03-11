@@ -111,19 +111,20 @@ function captureDisplayMacOS(display: Electron.Display): Promise<Electron.Native
 async function captureAllDisplaysWindows(
   displays: Electron.Display[],
 ): Promise<(Electron.NativeImage | null)[]> {
-  // Use the largest display dimensions for thumbnail size to ensure quality
-  const maxSf = Math.max(...displays.map((d) => d.scaleFactor));
-  const maxW = Math.max(...displays.map((d) => d.size.width));
-  const maxH = Math.max(...displays.map((d) => d.size.height));
+  // Request a large enough thumbnail to cover the highest-res display.
+  // desktopCapturer caps each source at its actual screen resolution.
+  const maxPhysW = Math.max(...displays.map((d) => Math.round(d.size.width * d.scaleFactor)));
+  const maxPhysH = Math.max(...displays.map((d) => Math.round(d.size.height * d.scaleFactor)));
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
-    thumbnailSize: {
-      width: Math.round(maxW * maxSf),
-      height: Math.round(maxH * maxSf),
-    },
+    thumbnailSize: { width: maxPhysW, height: maxPhysH },
   });
-  return displays.map((d) => {
-    const src = sources.find((s) => s.display_id === String(d.id));
+
+  return displays.map((d, idx) => {
+    // Try matching by display_id first (reliable on most Windows setups)
+    let src = sources.find((s) => s.display_id === String(d.id));
+    // Fallback: match by source index (sources are ordered like displays)
+    if (!src && idx < sources.length) src = sources[idx];
     return src ? src.thumbnail : null;
   });
 }
@@ -173,6 +174,7 @@ function showOverlaysOnAllDisplays(
 
     for (let i = 0; i < displays.length; i++) {
       const { x, y, width, height } = displays[i].bounds;
+      const isWindows = process.platform === 'win32';
 
       const win = new BrowserWindow({
         x,
@@ -180,16 +182,17 @@ function showOverlaysOnAllDisplays(
         width,
         height,
         frame: false,
-        // NO kiosk / NO fullscreen — these conflict across multiple displays on macOS.
-        // Instead we use a frameless window at display bounds + screen-saver level
-        // to cover everything including menu bar and dock.
+        // Windows: kiosk covers the entire screen including taskbar.
+        // macOS: NO kiosk/fullscreen — they conflict across multiple displays (Spaces).
+        //        Instead use frameless + screen-saver level + enableLargerThanScreen.
+        kiosk: isWindows,
         skipTaskbar: true,
         resizable: false,
         movable: false,
         minimizable: false,
         maximizable: false,
         hasShadow: false,
-        enableLargerThanScreen: true,
+        enableLargerThanScreen: !isWindows,
         show: false,
         webPreferences: {
           nodeIntegration: false,
@@ -198,10 +201,11 @@ function showOverlaysOnAllDisplays(
         },
       });
 
-      // screen-saver level is above menu bar and dock on macOS
       win.setAlwaysOnTop(true, 'screen-saver');
-      // visibleOnFullScreen prevents macOS from creating a new Space for the window
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      if (!isWindows) {
+        // macOS only: prevent creating a new Space for the window
+        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      }
       windows.push(win);
 
       const displayIndex = i;
