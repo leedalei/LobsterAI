@@ -555,31 +555,7 @@ const getCoworkRunner = () => {
 
     // Set up event listeners to forward to renderer
     coworkRunner.on('message', (sessionId: string, message: any) => {
-      // Debug: log user messages with metadata to trace imageAttachments
-      if (message?.type === 'user') {
-        const meta = message.metadata;
-        console.log('[main] coworkRunner message event (user)', {
-          sessionId,
-          messageId: message.id,
-          hasMetadata: !!meta,
-          metadataKeys: meta ? Object.keys(meta) : [],
-          hasImageAttachments: !!(meta?.imageAttachments),
-          imageAttachmentsCount: Array.isArray(meta?.imageAttachments) ? meta.imageAttachments.length : 0,
-          imageAttachmentsBase64Lengths: Array.isArray(meta?.imageAttachments) ? meta.imageAttachments.map((a: any) => a?.base64Data?.length ?? 0) : [],
-        });
-      }
       const safeMessage = sanitizeCoworkMessageForIpc(message);
-      // Debug: check sanitized result
-      if (message?.type === 'user') {
-        const safeMeta = safeMessage?.metadata;
-        console.log('[main] sanitized user message', {
-          hasMetadata: !!safeMeta,
-          metadataKeys: safeMeta ? Object.keys(safeMeta) : [],
-          hasImageAttachments: !!(safeMeta?.imageAttachments),
-          imageAttachmentsCount: Array.isArray(safeMeta?.imageAttachments) ? safeMeta.imageAttachments.length : 0,
-          imageAttachmentsBase64Lengths: Array.isArray(safeMeta?.imageAttachments) ? safeMeta.imageAttachments.map((a: any) => a?.base64Data?.length ?? 0) : [],
-        });
-      }
       const windows = BrowserWindow.getAllWindows();
       windows.forEach(win => {
         if (!win.isDestroyed()) {
@@ -926,17 +902,14 @@ if (!gotTheLock) {
   // macOS: handle open-url event for deep links
   app.on('open-url', (event, url) => {
     event.preventDefault();
-    console.log('[Auth] deep link received (open-url):', url);
     try {
       const parsed = new URL(url);
       if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
         const code = parsed.searchParams.get('code');
         if (code) {
           if (mainWindow && !mainWindow.isDestroyed()) {
-            console.log('[Auth] sending callback to renderer, code:', code);
             mainWindow.webContents.send('auth:callback', { code });
           } else {
-            console.log('[Auth] mainWindow not ready, caching deep link');
             pendingDeepLink = url;
           }
         }
@@ -947,22 +920,18 @@ if (!gotTheLock) {
   });
 
   app.on('second-instance', (_event, commandLine, workingDirectory) => {
-    console.log('[Main] second-instance event', { commandLine, workingDirectory });
 
     // Check for deep link in command line args (Windows/Linux)
     const deepLink = commandLine.find(arg => arg.startsWith('lobsterai://'));
     if (deepLink) {
-      console.log('[Auth] deep link received (second-instance):', deepLink);
       try {
         const parsed = new URL(deepLink);
         if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
           const code = parsed.searchParams.get('code');
           if (code) {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              console.log('[Auth] sending callback to renderer, code:', code);
               mainWindow.webContents.send('auth:callback', { code });
             } else {
-              console.log('[Auth] mainWindow not ready, caching deep link');
               pendingDeepLink = deepLink;
             }
           }
@@ -1121,7 +1090,7 @@ if (!gotTheLock) {
    */
   const getServerBaseUrl = (): string => {
     return isDev
-      ? 'http://10.55.165.37:18878'
+      ? 'https://lobsterai-server.inner.youdao.com'
       : 'https://lobsterai-server.youdao.com';
   };
 
@@ -1161,13 +1130,11 @@ if (!gotTheLock) {
     try {
       const serverBaseUrl = getServerBaseUrl();
       const url = `${serverBaseUrl}/api/auth/exchange`;
-      console.log('[Auth] exchange request:', url, 'code:', code);
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ authCode: code }),
       });
-      console.log('[Auth] exchange response status:', resp.status);
       if (!resp.ok) {
         return { success: false, error: `Exchange failed: ${resp.status}` };
       }
@@ -1188,7 +1155,6 @@ if (!gotTheLock) {
       }
       const data = apiResp.data;
       saveAuthTokens(data.accessToken, data.refreshToken);
-      console.log('[Auth] exchange success, user:', data.user);
       return { success: true, user: data.user, quota: data.quota };
     } catch (error) {
       console.error('[Auth] exchange failed:', error);
@@ -1292,7 +1258,6 @@ if (!gotTheLock) {
 
   ipcMain.handle('auth:getAccessToken', async () => {
     const tokens = getAuthTokens();
-    console.log('[Auth] getAccessToken called, hasTokens:', !!tokens, 'hasAccessToken:', !!tokens?.accessToken);
     return tokens?.accessToken || null;
   });
 
@@ -1565,12 +1530,6 @@ if (!gotTheLock) {
     imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>;
   }) => {
     try {
-      console.log('[main] cowork:session:continue handler', {
-        sessionId: options.sessionId,
-        hasImageAttachments: !!options.imageAttachments,
-        imageAttachmentsCount: options.imageAttachments?.length ?? 0,
-        imageAttachmentsNames: options.imageAttachments?.map(a => a.name),
-      });
       const runner = getCoworkRunner();
       runner.continueSession(options.sessionId, options.prompt, {
         systemPrompt: options.systemPrompt,
@@ -2488,13 +2447,6 @@ if (!gotTheLock) {
     activeStreamControllers.set(options.requestId, controller);
 
     try {
-      console.log('[Stream] request url:', options.url);
-      console.log('[Stream] request headers:', JSON.stringify({
-        ...options.headers,
-        Authorization: options.headers.Authorization
-          ? `${options.headers.Authorization.substring(0, 30)}...`
-          : 'missing',
-      }));
       const response = await session.defaultSession.fetch(options.url, {
         method: options.method,
         headers: options.headers,
@@ -2504,7 +2456,6 @@ if (!gotTheLock) {
 
       if (!response.ok) {
         const errorData = await response.text();
-        console.log('[Stream] request failed:', response.status, response.statusText, errorData);
         activeStreamControllers.delete(options.requestId);
         return {
           ok: false,
@@ -2685,13 +2636,11 @@ if (!gotTheLock) {
       emitWindowState();
       // Flush any deep link received before the window was ready
       if (pendingDeepLink) {
-        console.log('[Auth] flushing pending deep link:', pendingDeepLink);
         try {
           const parsed = new URL(pendingDeepLink);
           if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
             const code = parsed.searchParams.get('code');
             if (code && mainWindow && !mainWindow.isDestroyed()) {
-              console.log('[Auth] sending cached callback to renderer, code:', code);
               mainWindow.webContents.send('auth:callback', { code });
             }
           }

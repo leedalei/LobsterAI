@@ -1302,19 +1302,7 @@ export async function getEnhancedEnv(target: OpenAICompatProxyTarget = 'local'):
     ? buildEnvForConfig(config)
     : { ...process.env };
 
-  console.log('[getEnhancedEnv] target:', target);
-  console.log('[getEnhancedEnv] config present:', Boolean(config));
-  if (config) {
-    console.log('[getEnhancedEnv] config.baseURL:', config.baseURL);
-    console.log('[getEnhancedEnv] config.apiType:', config.apiType);
-  }
-  console.log('[getEnhancedEnv] before applyPackagedEnvOverrides: ANTHROPIC_AUTH_TOKEN present =', Boolean(env.ANTHROPIC_AUTH_TOKEN));
-  console.log('[getEnhancedEnv] before applyPackagedEnvOverrides: ANTHROPIC_API_KEY present =', Boolean(env.ANTHROPIC_API_KEY));
-
   applyPackagedEnvOverrides(env);
-
-  console.log('[getEnhancedEnv] after applyPackagedEnvOverrides: ANTHROPIC_AUTH_TOKEN present =', Boolean(env.ANTHROPIC_AUTH_TOKEN));
-  console.log('[getEnhancedEnv] after applyPackagedEnvOverrides: ANTHROPIC_API_KEY present =', Boolean(env.ANTHROPIC_API_KEY));
 
   // Inject SKILLs directory path for skill scripts.
   // On Windows, normalise backslashes to forward slashes so the value is usable
@@ -1400,7 +1388,7 @@ export async function getEnhancedEnvWithTmpdir(
 
 const SESSION_TITLE_FALLBACK = 'New Session';
 const SESSION_TITLE_MAX_CHARS = 50;
-const SESSION_TITLE_TIMEOUT_MS = 8000;
+const SESSION_TITLE_TIMEOUT_MS = 30000;
 const COWORK_MODEL_PROBE_TIMEOUT_MS = 20000;
 const API_ERROR_SNIPPET_MAX_CHARS = 240;
 
@@ -1556,17 +1544,6 @@ export async function probeCoworkModelReadiness(
     }
 
     const targetUrl = buildAnthropicMessagesUrl(config.baseURL);
-    console.log('[probeCoworkModelReadiness] baseURL:', config.baseURL);
-    console.log('[probeCoworkModelReadiness] targetUrl:', targetUrl);
-    console.log('[probeCoworkModelReadiness] isProxy:', isProxyEndpoint);
-    console.log('[probeCoworkModelReadiness] headers:', JSON.stringify(
-      Object.fromEntries(Object.entries(headers).map(([k, v]) =>
-        [k, k.toLowerCase() === 'authorization' ? v.substring(0, 20) + '...' : v]
-      ))
-    ));
-    console.log('[probeCoworkModelReadiness] model:', config.model);
-    console.log('[probeCoworkModelReadiness] apiKey present:', Boolean(config.apiKey));
-    console.log('[probeCoworkModelReadiness] apiKey length:', config.apiKey?.length ?? 0);
 
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -1583,11 +1560,6 @@ export async function probeCoworkModelReadiness(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      console.log('[probeCoworkModelReadiness] FAILED status:', response.status);
-      console.log('[probeCoworkModelReadiness] response headers:', JSON.stringify(
-        Object.fromEntries(response.headers.entries())
-      ));
-      console.log('[probeCoworkModelReadiness] error body:', errorText.substring(0, 500));
       const errorSnippet = extractApiErrorSnippet(errorText);
       return {
         ok: false,
@@ -1597,7 +1569,6 @@ export async function probeCoworkModelReadiness(
       };
     }
 
-    console.log('[probeCoworkModelReadiness] OK - model ready');
     return { ok: true };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
@@ -1649,16 +1620,18 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
       headers['anthropic-version'] = '2023-06-01';
     }
 
+    const requestBody: Record<string, unknown> = {
+      model: config.model,
+      max_tokens: 1024,
+      temperature: 0,
+      stream: false,
+      messages: [{ role: 'user', content: prompt }],
+    };
+
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 80,
-        temperature: 0,
-        stream: false,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
@@ -1683,20 +1656,36 @@ export async function generateSessionTitle(userIntent: string | null): Promise<s
           jsonChunks.push(trimmed.slice(5).trim());
         }
       }
-      // Try to find a message_start or content_block_delta with text
+      // Extract text from SSE events (content_block_delta with text or thinking)
       let resultText = '';
       for (const chunk of jsonChunks) {
         try {
           const obj = JSON.parse(chunk);
-          if (obj.type === 'content_block_delta' && obj.delta?.text) {
-            resultText += obj.delta.text;
+          if (obj.type === 'content_block_delta') {
+            if (obj.delta?.text) {
+              resultText += obj.delta.text;
+            }
+            // Some models return thinking content; ignore it for title
+          } else if (obj.type === 'message_delta' && obj.delta?.stop_reason) {
+            // End of message; text already accumulated
           }
         } catch { /* skip unparseable chunks */ }
+      }
+      if (!resultText) {
+        // Fallback: check content_block_start for pre-filled text blocks
+        for (const chunk of jsonChunks) {
+          try {
+            const obj = JSON.parse(chunk);
+            if (obj.type === 'content_block_start' && obj.content_block?.type === 'text' && obj.content_block?.text) {
+              resultText += obj.content_block.text;
+            }
+          } catch { /* skip */ }
+        }
       }
       if (resultText) {
         payload = { content: [{ type: 'text', text: resultText }] };
       } else {
-        console.warn('[cowork-title] SSE response but no text extracted, raw:', rawText.slice(0, 300));
+        console.warn('[cowork-title] SSE response but no text extracted. rawText length:', rawText.length, 'full raw:\n', rawText);
         return fallbackTitle;
       }
     } else {

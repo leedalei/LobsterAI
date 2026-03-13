@@ -39,8 +39,8 @@ describe('Proxy URL construction', () => {
   });
 
   it('should construct Anthropic proxy URL for test environment', () => {
-    const url = buildProxyUrl('http://10.55.165.37:18878');
-    assert.equal(url, 'http://10.55.165.37:18878/api/proxy/v1/messages');
+    const url = buildProxyUrl('https://lobsterai-server.inner.youdao.com');
+    assert.equal(url, 'https://lobsterai-server.inner.youdao.com/api/proxy/v1/messages');
   });
 
   it('should NOT use the old chat/completions path', () => {

@@ -11,8 +11,7 @@ const isTestMode = () => {
 
 // 后端服务
 export const getServerBaseUrl = () => isTestMode()
-  // ? 'https://lobsterai-server.inner.youdao.com'
-  ? 'http://10.55.165.37:18878'
+  ? 'https://lobsterai-server.inner.youdao.com'
   : 'https://lobsterai-server.youdao.com';
 
 // 自动更新

@@ -828,7 +828,6 @@ class ApiService {
     modelId: string = 'claude-sonnet-4-20250514',
   ): Promise<{ content: string; reasoning?: string }> {
     const accessToken = await authService.getAccessToken();
-    console.log('[Proxy] accessToken:', accessToken ? `${accessToken.substring(0, 20)}...` : 'null');
     if (!accessToken) {
       throw new ApiError('LOGIN_REQUIRED');
     }
@@ -964,7 +963,6 @@ class ApiService {
           body: JSON.stringify(requestBody),
           requestId,
         }).then((response) => {
-          console.log('[Proxy] stream response:', response.status, response.statusText);
           if (!response.ok && !aborted) {
             this.cleanup();
             if (response.status === 402) {

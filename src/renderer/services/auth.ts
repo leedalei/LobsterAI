@@ -10,9 +10,7 @@ class AuthService {
   async init() {
     // Register callback listener FIRST to avoid missing deep link events
     // during the async getUser() call
-    console.log('[Auth] registering callback listener');
     this.unsubCallback = window.electron.auth.onCallback(async ({ code }) => {
-      console.log('[Auth] callback received, code:', code);
       await this.handleCallback(code);
     });
 
@@ -42,10 +40,8 @@ class AuthService {
    */
   async handleCallback(code: string) {
     try {
-      console.log('[Auth] exchanging code...');
       const result = await window.electron.auth.exchange(code);
       if (result.success) {
-        console.log('[Auth] exchange success, user:', result.user);
         store.dispatch(setLoggedIn({ user: result.user, quota: result.quota }));
       } else {
         console.error('[Auth] exchange failed:', result.error);

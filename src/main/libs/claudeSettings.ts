@@ -235,18 +235,9 @@ export function resolveCurrentApiConfig(target: OpenAICompatProxyTarget = 'local
 
     const isDev = !app.isPackaged;
     const serverBaseUrl = isDev
-      ? 'http://10.55.165.37:18878'
+      ? 'https://lobsterai-server.inner.youdao.com'
       : 'https://lobsterai-server.youdao.com';
     const proxyUrl = `${serverBaseUrl}/api/proxy`;
-
-    console.log('[resolveCurrentApiConfig] lobsterai-proxy detected');
-    console.log('[resolveCurrentApiConfig] isDev:', isDev);
-    console.log('[resolveCurrentApiConfig] serverBaseUrl:', serverBaseUrl);
-    console.log('[resolveCurrentApiConfig] proxyUrl:', proxyUrl);
-    console.log('[resolveCurrentApiConfig] modelId:', modelId);
-    console.log('[resolveCurrentApiConfig] accessToken present:', Boolean(accessToken));
-    console.log('[resolveCurrentApiConfig] accessToken length:', accessToken.length);
-    console.log('[resolveCurrentApiConfig] accessToken prefix:', accessToken ? accessToken.substring(0, 20) + '...' : '(empty)');
 
     return {
       config: {
@@ -326,21 +317,14 @@ export function buildEnvForConfig(config: CoworkApiConfig): Record<string, strin
   const baseEnv = { ...process.env } as Record<string, string>;
 
   const isProxy = config.baseURL.includes('/api/proxy');
-  console.log('[buildEnvForConfig] baseURL:', config.baseURL);
-  console.log('[buildEnvForConfig] isProxy:', isProxy);
-  console.log('[buildEnvForConfig] apiKey present:', Boolean(config.apiKey));
-  console.log('[buildEnvForConfig] apiKey length:', config.apiKey?.length ?? 0);
-  console.log('[buildEnvForConfig] apiKey prefix:', config.apiKey?.substring(0, 20) + '...');
   if (isProxy) {
     // Proxy uses Bearer token auth — set AUTH_TOKEN for proxy authentication
     // SDK also requires ANTHROPIC_API_KEY to be present for initialization
     baseEnv.ANTHROPIC_AUTH_TOKEN = config.apiKey;
     baseEnv.ANTHROPIC_API_KEY = config.apiKey;
-    console.log('[buildEnvForConfig] PROXY mode: set both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY');
   } else {
     baseEnv.ANTHROPIC_AUTH_TOKEN = config.apiKey;
     baseEnv.ANTHROPIC_API_KEY = config.apiKey;
-    console.log('[buildEnvForConfig] DIRECT mode: set both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY');
   }
   baseEnv.ANTHROPIC_BASE_URL = config.baseURL;
   baseEnv.ANTHROPIC_MODEL = config.model;
@@ -352,13 +336,7 @@ export function buildEnvForConfig(config: CoworkApiConfig): Record<string, strin
   // so these internal SDK calls go through the same endpoint successfully.
   if (!baseEnv.ANTHROPIC_SMALL_FAST_MODEL) {
     baseEnv.ANTHROPIC_SMALL_FAST_MODEL = config.model;
-    console.log('[buildEnvForConfig] Set ANTHROPIC_SMALL_FAST_MODEL to:', config.model);
   }
-
-  console.log('[buildEnvForConfig] final env: ANTHROPIC_BASE_URL =', baseEnv.ANTHROPIC_BASE_URL);
-  console.log('[buildEnvForConfig] final env: ANTHROPIC_MODEL =', baseEnv.ANTHROPIC_MODEL);
-  console.log('[buildEnvForConfig] final env: ANTHROPIC_AUTH_TOKEN present =', Boolean(baseEnv.ANTHROPIC_AUTH_TOKEN));
-  console.log('[buildEnvForConfig] final env: ANTHROPIC_API_KEY present =', Boolean(baseEnv.ANTHROPIC_API_KEY));
 
   return baseEnv;
 }
