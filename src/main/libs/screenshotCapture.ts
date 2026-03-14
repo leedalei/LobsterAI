@@ -306,6 +306,8 @@ export async function captureScreenshot(
   const { hideWindow = false, cwd } = options;
 
   try {
+    const t0 = Date.now();
+
     // 0. Check macOS screen recording permission
     if (process.platform === 'darwin') {
       const status = systemPreferences.getMediaAccessStatus('screen');
@@ -326,6 +328,8 @@ export async function captureScreenshot(
       // Small buffer for the OS compositor to finish removing the window pixels
       await sleep(50);
     }
+    const t1 = Date.now();
+    console.log(`[Screenshot] timing: hide window ${t1 - t0}ms`);
 
     // 2. Prepare output path
     const dir = resolveScreenshotDir(cwd);
@@ -336,6 +340,8 @@ export async function captureScreenshot(
     const displays = screen.getAllDisplays();
     console.log(`[Screenshot] platform=${process.platform}, displays=${displays.length}`);
     const images = await captureAllDisplays(displays);
+    const t2 = Date.now();
+    console.log(`[Screenshot] timing: desktopCapturer ${t2 - t1}ms`);
 
     if (images.every((img) => !img || img.isEmpty())) {
       console.error('[Screenshot] All display captures failed or returned empty images');
@@ -381,6 +387,8 @@ export async function captureScreenshot(
       console.log(`[Screenshot] bgUrl[${i}] JPEG bytes: ${jpegBuf.length}`);
       return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
     });
+    const t3 = Date.now();
+    console.log(`[Screenshot] timing: encode+base64 ${t3 - t2}ms`);
 
     // 6. Determine which display the main window is on
     let activeDisplayIndex = 0;
@@ -392,6 +400,8 @@ export async function captureScreenshot(
 
     // 7. Show overlays on ALL displays
     const result = await showOverlaysOnAllDisplays(displays, bgUrls, activeDisplayIndex, overlayBounds);
+    const t4 = Date.now();
+    console.log(`[Screenshot] timing: overlay shown (until user confirm/cancel) ${t4 - t3}ms, total before user ${t3 - t0}ms`);
 
     // 8. Restore main window
     if (hideWindow && mainWindow && !mainWindow.isDestroyed()) {
