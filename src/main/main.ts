@@ -1094,8 +1094,41 @@ if (!gotTheLock) {
       : 'https://lobsterai-server.youdao.com';
   };
 
-  const getPortalBaseUrl = (): string => {
-    return 'https://local.youdao.com:5180';
+  const getPortalBaseUrl = async (): Promise<string> => {
+    const FALLBACK = 'https://local.youdao.com:5180';
+    const url = app.isPackaged
+      ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/lobsterai-portal-url'
+      : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/lobsterai-portal-url';
+    try {
+      const https = await import('https');
+      const data = await new Promise<string>((resolve, reject) => {
+        const req = https.get(url, { timeout: 10000 }, (res) => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`HTTP ${res.statusCode}`));
+            res.resume();
+            return;
+          }
+          let body = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk: string) => { body += chunk; });
+          res.on('end', () => resolve(body));
+          res.on('error', reject);
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+      });
+      const json = JSON.parse(data);
+      const value = json?.data?.value;
+      if (!value) {
+        console.warn('[Auth] Invalid overmind response for portal URL, using fallback');
+        return FALLBACK;
+      }
+      const portalUrl = typeof value === 'string' ? value.replace(/\/+$/, '') : FALLBACK;
+      return portalUrl;
+    } catch (error) {
+      console.warn('[Auth] Failed to fetch portal URL from overmind, using fallback:', error);
+      return FALLBACK;
+    }
   };
 
   /**
@@ -1116,7 +1149,7 @@ if (!gotTheLock) {
   ipcMain.handle('auth:login', async () => {
     try {
       // Open Portal login page directly in system browser (Portal handles URS SDK)
-      const portalBaseUrl = getPortalBaseUrl();
+      const portalBaseUrl = await getPortalBaseUrl();
       const loginUrl = `${portalBaseUrl}/login?source=electron`;
       await shell.openExternal(loginUrl);
       return { success: true };
