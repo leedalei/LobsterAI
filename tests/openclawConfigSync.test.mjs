@@ -78,6 +78,24 @@ const createOpenAICompatAppConfig = () => ({
   },
 });
 
+const createCustomAnthropicAppConfig = (baseUrl) => ({
+  model: {
+    defaultModel: 'claude-opus-4-6',
+    defaultModelProvider: 'custom',
+  },
+  providers: {
+    custom: {
+      enabled: true,
+      apiKey: 'sk-test',
+      baseUrl,
+      apiFormat: 'anthropic',
+      models: [
+        { id: 'claude-opus-4-6' },
+      ],
+    },
+  },
+});
+
 const createSessionStore = () => ({
   'agent:main:lobsterai:current-session': {
     sessionId: 'session-current',
@@ -248,6 +266,22 @@ test('sync denies exec for native channel sessions even without provider migrati
   assert.equal(sessionStore['agent:main:feishu:dm:ou_123'].execSecurity, 'deny');
   assert.equal('skillsSnapshot' in sessionStore['agent:main:wecom:direct:wangning'], false);
   assert.equal('skillsSnapshot' in sessionStore['agent:main:feishu:dm:ou_123'], false);
+});
+
+test('sync normalizes custom anthropic provider base URLs with trailing /v1', (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-config-sync-custom-anthropic-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  setElectronPaths(tmpDir);
+
+  const sync = createSync(tmpDir, createCustomAnthropicAppConfig('https://proxy.example.com/anthropic/v1'));
+  const result = sync.sync('test-custom-anthropic-baseurl');
+
+  assert.equal(result.ok, true);
+
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'state', 'openclaw.json'), 'utf8'));
+  assert.equal(config.models.providers.lobster.baseUrl, 'https://proxy.example.com/anthropic');
+  assert.equal(config.models.providers.lobster.api, 'anthropic-messages');
+  assert.equal(config.agents.defaults.model.primary, 'lobster/claude-opus-4-6');
 });
 
 test('sync writes scheduled-task policy into managed AGENTS.md for native channel sessions', (t) => {

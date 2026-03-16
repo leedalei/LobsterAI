@@ -96,6 +96,19 @@ type MatchedProvider = {
   supportsImage?: boolean;
 };
 
+function normalizeAnthropicCompatibleBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return '';
+  }
+
+  // Older Anthropic-compatible runtimes append `/v1/messages` themselves.
+  // Normalize common user-entered forms so `/v1` does not become `/v1/v1/messages`.
+  return trimmed
+    .replace(/\/v1\/messages$/i, '')
+    .replace(/\/v1$/i, '');
+}
+
 function getEffectiveProviderApiFormat(providerName: string, apiFormat: unknown): AnthropicApiFormat {
   if (providerName === 'openai' || providerName === 'gemini' || providerName === 'stepfun' || providerName === 'youdaozhiyun') {
     return 'openai';
@@ -221,6 +234,10 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
 
   if (!baseURL) {
     return { matched: null, error: `Provider ${providerName} is missing base URL.` };
+  }
+
+  if (apiFormat === 'anthropic') {
+    baseURL = normalizeAnthropicCompatibleBaseUrl(baseURL);
   }
 
   if (apiFormat === 'anthropic' && providerRequiresApiKey(providerName) && !providerConfig.apiKey?.trim()) {

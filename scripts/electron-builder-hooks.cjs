@@ -73,11 +73,19 @@ function syncCurrentOpenClawRuntimeForTarget(context) {
   }
 
   const targetRoot = path.join(runtimeBase, targetId);
+  const currentBuildInfo = readRuntimeBuildInfo(currentRoot);
   if (!existsSync(targetRoot)) {
-    return { runtimeRoot: currentRoot, targetId };
+    if (currentBuildInfo?.target === targetId) {
+      return { runtimeRoot: currentRoot, targetId };
+    }
+
+    throw new Error(
+      '[electron-builder-hooks] Missing target-specific OpenClaw runtime: '
+      + `${targetRoot}. Current runtime target is ${currentBuildInfo?.target || 'unknown'}. `
+      + `Run \`${getOpenClawRuntimeBuildHint(targetId)}\` before packaging.`,
+    );
   }
 
-  const currentBuildInfo = readRuntimeBuildInfo(currentRoot);
   if (currentBuildInfo?.target !== targetId) {
     rmSync(currentRoot, { recursive: true, force: true });
     cpSync(targetRoot, currentRoot, { recursive: true, force: true });

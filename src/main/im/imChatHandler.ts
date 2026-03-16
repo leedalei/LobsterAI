@@ -158,6 +158,19 @@ export class IMChatHandler {
       || resolvedModel.startsWith('o4');
   }
 
+  private buildAnthropicMessagesUrl(config: LLMConfig): string {
+    const normalized = config.baseUrl.trim().replace(/\/+$/, '');
+    if (!normalized) {
+      return '/v1/messages';
+    }
+    if (normalized.endsWith('/v1/messages')) {
+      return normalized;
+    }
+
+    const baseUrl = normalized.replace(/\/v1$/i, '');
+    return `${baseUrl}/v1/messages`;
+  }
+
   /**
    * Call Anthropic API
    */
@@ -166,7 +179,7 @@ export class IMChatHandler {
     userMessage: string,
     systemPrompt?: string
   ): Promise<string> {
-    const url = `${config.baseUrl.replace(/\/$/, '')}/v1/messages`;
+    const url = this.buildAnthropicMessagesUrl(config);
 
     const body: any = {
       model: config.model || 'claude-3-5-sonnet-20241022',
