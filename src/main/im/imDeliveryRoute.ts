@@ -2,6 +2,7 @@ import {
   buildManagedSessionKey,
   DEFAULT_MANAGED_AGENT_ID,
 } from '../libs/openclawChannelSessionSync';
+import { WEBCHAT_AGENT_ID } from '../libs/openclawConfigSync';
 
 export interface OpenClawDeliveryRoute {
   channel: string;
@@ -102,7 +103,16 @@ export function resolveManagedSessionDeliveryRoute(
   coworkSessionId: string,
   sessions: unknown[],
 ): { sessionKey: string; route: OpenClawDeliveryRoute } | null {
-  return resolveOpenClawDeliveryRouteForSessionKeys([buildManagedSessionKey(coworkSessionId)], sessions);
+  // Try the webchat agent first (current default), then fall back to the
+  // legacy "main" agent so that older sessions created before the webchat
+  // agent migration still resolve correctly.
+  return resolveOpenClawDeliveryRouteForSessionKeys(
+    [
+      buildManagedSessionKey(coworkSessionId, WEBCHAT_AGENT_ID),
+      buildManagedSessionKey(coworkSessionId, DEFAULT_MANAGED_AGENT_ID),
+    ],
+    sessions,
+  );
 }
 
 export function buildDingTalkSendParamsFromRoute(

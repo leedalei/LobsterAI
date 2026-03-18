@@ -22,6 +22,7 @@ import {
   isManagedSessionKey,
   parseManagedSessionKey,
 } from '../openclawChannelSessionSync';
+import { WEBCHAT_AGENT_ID } from '../openclawConfigSync';
 import {
   extractGatewayHistoryEntries,
   extractGatewayMessageText,
@@ -3392,7 +3393,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   private toSessionKey(sessionId: string): string {
-    return buildManagedSessionKey(sessionId);
+    return buildManagedSessionKey(sessionId, WEBCHAT_AGENT_ID);
   }
 
   private requireGatewayClient(): GatewayClientLike {

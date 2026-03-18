@@ -6,7 +6,7 @@ import type { TelegramOpenClawConfig, DiscordOpenClawConfig } from '../im/types'
 import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
-import { parseChannelSessionKey } from './openclawChannelSessionSync';
+import { isManagedSessionKey, parseChannelSessionKey } from './openclawChannelSessionSync';
 import type { McpToolManifestEntry } from './mcpServerManager';
 import { hasBundledOpenClawExtension } from './openclawLocalExtensions';
 import { buildScheduledTaskEnginePrompt } from './scheduledTaskEnginePrompt';
@@ -49,6 +49,14 @@ const MANAGED_OWNER_ALLOW_FROM = [
 ];
 
 const MANAGED_TOOL_DENY = ['web_search'] as const;
+
+/**
+ * Agent ID used for webchat sessions originating from the LobsterAI UI.
+ * Webchat sessions use a dedicated agent with a trimmed tool set so that
+ * IM-specific plugin tools (Feishu, MCP bridge, etc.) are not loaded,
+ * significantly reducing system prompt token consumption.
+ */
+export const WEBCHAT_AGENT_ID = 'webchat';
 
 const MANAGED_SKILL_ENTRY_OVERRIDES: Record<string, { enabled: boolean }> = {
   // QQ plugin ships a legacy reminder skill that steers the model toward a
@@ -541,6 +549,31 @@ export class OpenClawConfigSync {
           },
           ...(workspaceDir ? { workspace: workspaceDir } : {}),
         },
+        list: [
+          {
+            id: 'main',
+            default: true,
+            // IM channel sessions keep the full tool set.
+          },
+          {
+            id: WEBCHAT_AGENT_ID,
+            // Share the same workspace as main so AGENTS.md, MEMORY.md, etc.
+            // are discovered correctly. Without this, non-default agents fall
+            // back to {STATE_DIR}/workspace-{agentId}/ which is empty.
+            ...(workspaceDir ? { workspace: workspaceDir } : {}),
+            // Webchat sessions deny IM plugin tools that register actual tools,
+            // saving ~11K tokens from the system prompt.
+            // Only feishu (33 tools) and wecom (1 tool) register tools;
+            // other IM plugins (dingtalk, qqbot, popo) are channel-only adapters.
+            // MCP bridge tools are kept available for desktop use.
+            tools: {
+              deny: [
+                'feishu-openclaw-plugin',
+                'wecom-openclaw-plugin',
+              ],
+            },
+          },
+        ],
       },
       session: {
         dmScope: 'per-channel-peer',
@@ -941,7 +974,7 @@ export class OpenClawConfigSync {
         }
       }
 
-      if (!shouldMigrateManagedModelRefs || !sessionKey.startsWith('agent:main:lobsterai:')) {
+      if (!shouldMigrateManagedModelRefs || !isManagedSessionKey(sessionKey)) {
         continue;
       }
 
