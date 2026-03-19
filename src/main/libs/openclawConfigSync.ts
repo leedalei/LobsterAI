@@ -550,6 +550,10 @@ export class OpenClawConfigSync {
       },
       tools: {
         deny: [...MANAGED_TOOL_DENY],
+        exec: {
+          host: 'gateway',
+          ask: 'always',
+        },
         web: {
           search: {
             enabled: false,
@@ -923,6 +927,10 @@ export class OpenClawConfigSync {
     }
 
     let changed = false;
+    // Map three-tier imExecSecurity to gateway's two-tier execSecurity
+    const imExecPolicy = this.getCoworkConfig().imExecSecurity || 'deny';
+    const gatewayExecSecurity = imExecPolicy === 'deny' ? 'deny' : 'ask';
+
     for (const [sessionKey, rawEntry] of Object.entries(sessionStore)) {
       if (!rawEntry || typeof rawEntry !== 'object') {
         continue;
@@ -930,13 +938,22 @@ export class OpenClawConfigSync {
 
       const entry = rawEntry as Record<string, unknown>;
       if (parseChannelSessionKey(sessionKey) !== null) {
+        // Channel (IM) sessions: use configured imExecSecurity policy
         const execSecurity = typeof entry.execSecurity === 'string' ? entry.execSecurity.trim() : '';
-        if (execSecurity !== 'deny') {
-          entry.execSecurity = 'deny';
+        if (execSecurity !== gatewayExecSecurity) {
+          entry.execSecurity = gatewayExecSecurity;
           changed = true;
         }
         if (sessionSnapshotContainsDisabledManagedSkill(entry)) {
           delete entry.skillsSnapshot;
+          changed = true;
+        }
+      } else {
+        // Local sessions: always set 'ask' so the gateway emits approval events
+        // for dangerous-command interception in the adapter layer.
+        const execSecurity = typeof entry.execSecurity === 'string' ? entry.execSecurity.trim() : '';
+        if (execSecurity !== 'ask') {
+          entry.execSecurity = 'ask';
           changed = true;
         }
       }

@@ -21,12 +21,14 @@ import {
   type OpenClawChannelSessionSync,
   isManagedSessionKey,
   parseManagedSessionKey,
+  parseChannelSessionKey,
 } from '../openclawChannelSessionSync';
 import {
   extractGatewayHistoryEntries,
   extractGatewayMessageText,
 } from '../openclawHistory';
 import { buildOpenClawLocalTimeContextPrompt } from '../openclawLocalTimeContextPrompt';
+import { isDangerousCommand } from '../commandSafety';
 
 const OPENCLAW_GATEWAY_TOOL_EVENTS_CAP = 'tool-events';
 const BRIDGE_MAX_MESSAGES = 20;
@@ -2338,6 +2340,16 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     }
 
     this.pendingApprovals.set(requestId, { requestId, sessionId });
+
+    // For local (non-channel) sessions, auto-approve safe commands
+    // so only dangerous commands trigger the permission modal.
+    const command = typeof request.command === 'string' ? request.command : '';
+    if (parseChannelSessionKey(sessionKey) === null) {
+      if (command && !isDangerousCommand(command)) {
+        this.respondToPermission(requestId, { behavior: 'allow' });
+        return;
+      }
+    }
 
     const permissionRequest: PermissionRequest = {
       requestId,
