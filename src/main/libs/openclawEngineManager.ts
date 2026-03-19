@@ -7,6 +7,7 @@ import path from 'path';
 import { getElectronNodeRuntimePath } from './coworkUtil';
 import { syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
 import { applyBundledOpenClawRuntimeHotfixes } from './openclawRuntimeHotfix';
+import { appendPythonRuntimeToEnv } from './pythonRuntime';
 import { isSystemProxyEnabled, resolveSystemProxyUrl } from './systemProxy';
 
 const DEFAULT_OPENCLAW_VERSION = '2026.2.23';
@@ -389,6 +390,13 @@ export class OpenClawEngineManager extends EventEmitter {
     };
     if (cliShimDir) {
       env.PATH = [cliShimDir, env.PATH].filter(Boolean).join(path.delimiter);
+    }
+
+    // Ensure Python runtime is available in the gateway environment (Windows only).
+    appendPythonRuntimeToEnv(env);
+    if (process.platform === 'win32') {
+      env.PYTHONUTF8 = '1';
+      env.PYTHONIOENCODING = 'utf-8';
     }
 
     if (isSystemProxyEnabled()) {
