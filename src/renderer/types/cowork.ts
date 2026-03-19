@@ -14,6 +14,7 @@ export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result
 // Cowork execution mode
 export type CoworkExecutionMode = 'auto' | 'local' | 'sandbox';
 export type CoworkAgentEngine = 'openclaw' | 'yd_cowork';
+export type ImExecSecurity = 'deny' | 'ask-dangerous' | 'ask';
 
 // Cowork message metadata
 export interface CoworkMessageMetadata {
@@ -66,6 +67,7 @@ export interface CoworkConfig {
   memoryLlmJudgeEnabled: boolean;
   memoryGuardLevel: 'strict' | 'standard' | 'relaxed';
   memoryUserMemoriesMaxItems: number;
+  imExecSecurity: ImExecSecurity;
 }
 
 export type CoworkConfigUpdate = Partial<Pick<
@@ -78,6 +80,7 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'memoryLlmJudgeEnabled'
   | 'memoryGuardLevel'
   | 'memoryUserMemoriesMaxItems'
+  | 'imExecSecurity'
 >>;
 
 export interface CoworkApiConfig {

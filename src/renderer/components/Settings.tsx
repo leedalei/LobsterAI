@@ -21,6 +21,7 @@ import { RootState } from '../store';
 import ThemedSelect from './ui/ThemedSelect';
 import type {
   CoworkAgentEngine,
+  ImExecSecurity,
   OpenClawEngineStatus,
   CoworkUserMemoryEntry,
   CoworkMemoryStats,
@@ -533,6 +534,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   const coworkConfig = useSelector((state: RootState) => state.cowork.config);
 
   const [coworkAgentEngine, setCoworkAgentEngine] = useState<CoworkAgentEngine>(coworkConfig.agentEngine || 'openclaw');
+  const [imExecSecurity, setImExecSecurity] = useState<ImExecSecurity>(coworkConfig.imExecSecurity || 'deny');
   const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(coworkConfig.memoryEnabled ?? true);
   const [coworkMemoryLlmJudgeEnabled, setCoworkMemoryLlmJudgeEnabled] = useState<boolean>(coworkConfig.memoryLlmJudgeEnabled ?? false);
   const [coworkMemoryEntries, setCoworkMemoryEntries] = useState<CoworkUserMemoryEntry[]>([]);
@@ -550,10 +552,12 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
   useEffect(() => {
     setCoworkAgentEngine(coworkConfig.agentEngine || 'openclaw');
+    setImExecSecurity(coworkConfig.imExecSecurity || 'deny');
     setCoworkMemoryEnabled(coworkConfig.memoryEnabled ?? true);
     setCoworkMemoryLlmJudgeEnabled(coworkConfig.memoryLlmJudgeEnabled ?? false);
   }, [
     coworkConfig.agentEngine,
+    coworkConfig.imExecSecurity,
     coworkConfig.memoryEnabled,
     coworkConfig.memoryLlmJudgeEnabled,
   ]);
@@ -946,6 +950,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   };
 
   const hasCoworkConfigChanges = coworkAgentEngine !== coworkConfig.agentEngine
+    || imExecSecurity !== (coworkConfig.imExecSecurity || 'deny')
     || coworkMemoryEnabled !== coworkConfig.memoryEnabled
     || coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled;
   const isOpenClawAgentEngine = coworkAgentEngine === 'openclaw';
@@ -1210,6 +1215,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
       if (hasCoworkConfigChanges) {
         const updated = await coworkService.updateConfig({
           agentEngine: coworkAgentEngine,
+          imExecSecurity,
           memoryEnabled: coworkMemoryEnabled,
           memoryLlmJudgeEnabled: coworkMemoryLlmJudgeEnabled,
         });
@@ -2125,6 +2131,34 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                 </div>
               </div>
             )}
+
+            {/* IM Channel Command Execution Security */}
+            <div className="space-y-3">
+              <div className="text-sm font-medium dark:text-claude-darkText text-claude-text">
+                {i18nService.t('imExecSecurityLabel')}
+              </div>
+              {([
+                { value: 'deny' as const, label: 'imExecSecurityDeny', hint: 'imExecSecurityDenyHint' },
+                { value: 'ask-dangerous' as const, label: 'imExecSecurityAskDangerous', hint: 'imExecSecurityAskDangerousHint' },
+                { value: 'ask' as const, label: 'imExecSecurityAsk', hint: 'imExecSecurityAskHint' },
+              ]).map((option) => (
+                <div
+                  key={option.value}
+                  className="flex items-start gap-3 rounded-xl border px-3 py-2 text-sm dark:border-claude-darkBorder border-claude-border cursor-pointer"
+                  onClick={() => setImExecSecurity(option.value)}
+                >
+                  <input type="radio" checked={imExecSecurity === option.value} readOnly className="mt-1" />
+                  <span>
+                    <span className="block font-medium dark:text-claude-darkText text-claude-text">
+                      {i18nService.t(option.label)}
+                    </span>
+                    <span className="block text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                      {i18nService.t(option.hint)}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         );
 

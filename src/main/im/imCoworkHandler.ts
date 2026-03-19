@@ -13,6 +13,7 @@ import type { IMStore } from './imStore';
 import type { IMMessage, IMPlatform, IMMediaAttachment, IMSessionMapping } from './types';
 import { buildIMMediaInstruction } from './imMediaInstruction';
 import { analyzeIMReply, DEFAULT_IM_EMPTY_REPLY } from './imReplyGuard';
+import { isDangerousCommand } from '../libs/commandSafety';
 import {
   isReminderSystemTurn,
   type IMScheduledTaskCreationResult,
@@ -767,6 +768,30 @@ export class IMCoworkHandler extends EventEmitter {
         message: 'IM session mapping missing for permission request.',
       });
       return;
+    }
+
+    // For 'ask-dangerous' mode, auto-approve safe (non-dangerous) commands
+    const imExecSecurity = this.coworkStore.getConfig().imExecSecurity;
+
+    // Deny mode: reject exec even if the gateway sent an approval request
+    // (safety net for race between global config and session store sync).
+    if (imExecSecurity === 'deny' && request.toolName === 'Bash') {
+      this.coworkRuntime.respondToPermission(request.requestId, {
+        behavior: 'deny',
+        message: 'IM exec denied by policy.',
+      });
+      return;
+    }
+
+    if (imExecSecurity === 'ask-dangerous' && request.toolName === 'Bash') {
+      const command = typeof request.toolInput?.command === 'string'
+        ? request.toolInput.command : '';
+      if (command && !isDangerousCommand(command)) {
+        this.coworkRuntime.respondToPermission(request.requestId, {
+          behavior: 'allow',
+        });
+        return;
+      }
     }
 
     const key = this.createConversationKey(conversation.conversationId, conversation.platform);

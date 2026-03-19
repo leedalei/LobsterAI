@@ -33,6 +33,7 @@ const DEFAULT_MEMORY_ENABLED = true;
 const DEFAULT_MEMORY_IMPLICIT_UPDATE_ENABLED = true;
 const DEFAULT_MEMORY_LLM_JUDGE_ENABLED = false;
 const DEFAULT_MEMORY_GUARD_LEVEL: CoworkMemoryGuardLevel = 'strict';
+const DEFAULT_IM_EXEC_SECURITY = 'deny' as const;
 const DEFAULT_MEMORY_USER_MEMORIES_MAX_ITEMS = 12;
 const MIN_MEMORY_USER_MEMORIES_MAX_ITEMS = 1;
 const MAX_MEMORY_USER_MEMORIES_MAX_ITEMS = 60;
@@ -43,6 +44,11 @@ const MEMORY_ASSISTANT_STYLE_TEXT_RE = /^(?:使用|use)\s+[A-Za-z0-9._-]+\s*(?:�
 function normalizeMemoryGuardLevel(value: string | undefined): CoworkMemoryGuardLevel {
   if (value === 'strict' || value === 'standard' || value === 'relaxed') return value;
   return DEFAULT_MEMORY_GUARD_LEVEL;
+}
+
+function normalizeImExecSecurity(value: string | undefined): ImExecSecurity {
+  if (value === 'deny' || value === 'ask-dangerous' || value === 'ask') return value;
+  return DEFAULT_IM_EXEC_SECURITY;
 }
 
 function parseBooleanConfig(value: string | undefined, fallback: boolean): boolean {
@@ -297,6 +303,7 @@ export type CoworkSessionStatus = 'idle' | 'running' | 'completed' | 'error';
 export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'system';
 export type CoworkExecutionMode = 'auto' | 'local' | 'sandbox';
 export type CoworkAgentEngine = 'openclaw' | 'yd_cowork';
+export type ImExecSecurity = 'deny' | 'ask-dangerous' | 'ask';
 
 const COWORK_AGENT_ENGINE = 'openclaw';
 
@@ -409,6 +416,7 @@ export interface CoworkConfig {
   memoryLlmJudgeEnabled: boolean;
   memoryGuardLevel: CoworkMemoryGuardLevel;
   memoryUserMemoriesMaxItems: number;
+  imExecSecurity: ImExecSecurity;
 }
 
 export type CoworkConfigUpdate = Partial<Pick<
@@ -421,6 +429,7 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'memoryLlmJudgeEnabled'
   | 'memoryGuardLevel'
   | 'memoryUserMemoriesMaxItems'
+  | 'imExecSecurity'
 >>;
 
 export interface ApplyTurnMemoryUpdatesOptions {
@@ -882,6 +891,7 @@ export class CoworkStore {
     const memoryLlmJudgeEnabledRow = this.getOne<ConfigRow>('SELECT value FROM cowork_config WHERE key = ?', ['memoryLlmJudgeEnabled']);
     const memoryGuardLevelRow = this.getOne<ConfigRow>('SELECT value FROM cowork_config WHERE key = ?', ['memoryGuardLevel']);
     const memoryUserMemoriesMaxItemsRow = this.getOne<ConfigRow>('SELECT value FROM cowork_config WHERE key = ?', ['memoryUserMemoriesMaxItems']);
+    const imExecSecurityRow = this.getOne<ConfigRow>('SELECT value FROM cowork_config WHERE key = ?', ['imExecSecurity']);
 
     const normalizedAgentEngine = normalizeCoworkAgentEngineValue(agentEngineRow?.value);
 
@@ -901,6 +911,7 @@ export class CoworkStore {
       ),
       memoryGuardLevel: normalizeMemoryGuardLevel(memoryGuardLevelRow?.value),
       memoryUserMemoriesMaxItems: clampMemoryUserMemoriesMaxItems(Number(memoryUserMemoriesMaxItemsRow?.value)),
+      imExecSecurity: normalizeImExecSecurity(imExecSecurityRow?.value),
     };
   }
 
@@ -986,6 +997,16 @@ export class CoworkStore {
           value = excluded.value,
           updated_at = excluded.updated_at
       `, [String(clampMemoryUserMemoriesMaxItems(config.memoryUserMemoriesMaxItems)), now]);
+    }
+
+    if (config.imExecSecurity !== undefined) {
+      this.db.run(`
+        INSERT INTO cowork_config (key, value, updated_at)
+        VALUES ('imExecSecurity', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = excluded.updated_at
+      `, [normalizeImExecSecurity(config.imExecSecurity), now]);
     }
 
     this.saveDb();
