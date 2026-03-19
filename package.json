@@ -37,6 +37,11 @@
         "version": "1.0.62",
         "registry": "https://npm.nie.netease.com",
         "optional": true
+      },
+      {
+        "id": "nim",
+        "npm": "openclaw-nim",
+        "version": "0.3.0"
       }
     ]
   },

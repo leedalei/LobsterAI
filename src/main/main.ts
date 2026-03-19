@@ -48,6 +48,7 @@ import { IMGatewayManager, IMPlatform, IMGatewayConfig } from './im';
 import { APP_NAME } from './appConstants';
 import { getSkillServiceManager } from './skillServices';
 import { createTray, destroyTray, updateTrayMenu } from './trayManager';
+import { setLanguage } from './i18n';
 import { isAutoLaunched, getAutoLaunchEnabled, setAutoLaunchEnabled } from './autoLaunchManager';
 import { McpStore } from './mcpStore';
 import { CronJobService } from './libs/cronJobService';
@@ -769,6 +770,13 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
       getPopoConfig: () => {
         try {
           return getIMGatewayManager().getConfig().popo;
+          } catch {
+          return null;
+        }
+      },
+      getNimConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().nim;
         } catch {
           return null;
         }
@@ -1006,6 +1014,7 @@ const getCoworkEngineRouter = () => {
             coworkStore: getCoworkStore(),
             imStore,
             getDefaultCwd: () => getCoworkStore().getConfig().workingDirectory || os.homedir(),
+            resolveJobName: (jobId) => getCronJobService().getJobNameSync(jobId),
           });
           openClawRuntimeAdapter.setChannelSessionSync(channelSessionSync);
         }
@@ -2893,6 +2902,17 @@ if (!gotTheLock) {
     }
     return '127.0.0.1';
   });
+  ipcMain.handle('im:openclaw:config-schema', async () => {
+    try {
+      const result = await getIMGatewayManager().getOpenClawConfigSchema();
+      return { success: true, result };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get OpenClaw config schema',
+      };
+    }
+  });
 
   // ---- Pairing IPC handlers ----
 
@@ -3576,8 +3596,11 @@ if (!gotTheLock) {
       if (!isAutoLaunched()) {
         mainWindow?.show();
       }
+      // Initialize main-process i18n from stored language before creating UI elements.
+      const initLang = getStore().get<{ language?: string }>('app_config')?.language;
+      setLanguage(initLang === 'en' ? 'en' : 'zh');
       // 窗口就绪后创建系统托盘
-      createTray(() => mainWindow, getStore());
+      createTray(() => mainWindow);
 
       // Start cron polling after the window is ready.
       (async () => {
@@ -3839,7 +3862,8 @@ if (!gotTheLock) {
       const currentLanguage = newConfig?.language;
       if (currentLanguage !== lastLanguage) {
         lastLanguage = currentLanguage;
-        updateTrayMenu(() => mainWindow, getStore());
+        setLanguage(currentLanguage === 'en' ? 'en' : 'zh');
+        updateTrayMenu(() => mainWindow);
       }
 
       const previousUseSystemProxy = oldConfig

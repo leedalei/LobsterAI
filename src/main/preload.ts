@@ -294,6 +294,9 @@ contextBridge.exposeInMainWorld('electron', {
     // Status
     getStatus: () => ipcRenderer.invoke('im:status:get'),
     getLocalIp: () => ipcRenderer.invoke('im:getLocalIp') as Promise<string>,
+    // OpenClaw config schema
+    getOpenClawConfigSchema: () => ipcRenderer.invoke('im:openclaw:config-schema'),
+
 
     // Pairing
     listPairingRequests: (platform: string) => ipcRenderer.invoke('im:pairing:list', platform),
