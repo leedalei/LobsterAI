@@ -268,7 +268,14 @@ const normalizeCaptureRect = (rect?: Partial<CaptureRect> | null): CaptureRect |
 
 const resolveTaskWorkingDirectory = (workspaceRoot: string): string => {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
-  fs.mkdirSync(resolvedWorkspaceRoot, { recursive: true });
+  // Reject bare Windows drive roots (e.g. "D:\") — mkdir on drive roots causes EPERM,
+  // and some agent engines (OpenClaw) also fail when given a drive root as workspace.
+  if (process.platform === 'win32' && /^[a-zA-Z]:\\?$/.test(resolvedWorkspaceRoot)) {
+    throw new Error(`Cannot use a drive root as the working directory (${resolvedWorkspaceRoot}). Please select a subfolder instead, for example: ${resolvedWorkspaceRoot}Projects`);
+  }
+  if (!fs.existsSync(resolvedWorkspaceRoot)) {
+    fs.mkdirSync(resolvedWorkspaceRoot, { recursive: true });
+  }
   if (!fs.statSync(resolvedWorkspaceRoot).isDirectory()) {
     throw new Error(`Selected workspace is not a directory: ${resolvedWorkspaceRoot}`);
   }
@@ -2574,6 +2581,12 @@ if (!gotTheLock) {
 
   ipcMain.handle('scheduledTask:list', async () => {
     try {
+      // If OpenClaw gateway is not connected yet, return empty list immediately
+      // to avoid blocking the renderer init. Tasks will be loaded later via the
+      // onRefresh listener when the gateway becomes available.
+      if (!openClawRuntimeAdapter?.getGatewayClient()) {
+        return { success: true, tasks: [] };
+      }
       const tasks = await getCronJobService().listJobs();
       return { success: true, tasks };
     } catch (error) {
@@ -3772,7 +3785,14 @@ if (!gotTheLock) {
       console.error('[OpenClaw] Startup config sync failed:', startupSync.error);
     }
     if (resolveCoworkAgentEngine() === 'openclaw') {
-      void ensureOpenClawRunningForCowork().catch((error) => {
+      void ensureOpenClawRunningForCowork().then(() => {
+        // Start cron polling once the gateway is confirmed running.
+        try {
+          getCronJobService().startPolling();
+        } catch (err) {
+          console.warn('[Main] CronJobService not available after OpenClaw startup:', err);
+        }
+      }).catch((error) => {
         console.error('[OpenClaw] Failed to auto-start gateway on app startup:', error);
       });
     }

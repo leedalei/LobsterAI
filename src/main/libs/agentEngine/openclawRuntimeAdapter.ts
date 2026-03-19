@@ -29,6 +29,8 @@ import {
 } from '../openclawHistory';
 import { buildOpenClawLocalTimeContextPrompt } from '../openclawLocalTimeContextPrompt';
 import { isDangerousCommand } from '../commandSafety';
+import { OPENCLAW_AGENT_TIMEOUT_SECONDS } from '../openclawConfigSync';
+import { t } from '../../i18n';
 
 const OPENCLAW_GATEWAY_TOOL_EVENTS_CAP = 'tool-events';
 const BRIDGE_MAX_MESSAGES = 20;
@@ -118,6 +120,8 @@ type ActiveTurn = {
   bufferedChatPayloads: BufferedChatEvent[];
   /** Agent events buffered while pendingUserSync is true. */
   bufferedAgentPayloads: BufferedAgentEvent[];
+  /** Client-side timeout watchdog timer (fallback for missing gateway abort events). */
+  timeoutTimer?: ReturnType<typeof setTimeout>;
 };
 
 type BufferedChatEvent = {
@@ -556,6 +560,14 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private pendingMessageUpdateTimer: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private static readonly MESSAGE_UPDATE_THROTTLE_MS = 100;
 
+  /**
+   * Server-side agent timeout in seconds (mirrors agents.defaults.timeoutSeconds in openclaw config).
+   * Used to set a client-side fallback timer that fires slightly after the server timeout,
+   * so LobsterAI can recover even when the gateway fails to deliver the abort event.
+   */
+  agentTimeoutSeconds = OPENCLAW_AGENT_TIMEOUT_SECONDS;
+  private static readonly CLIENT_TIMEOUT_GRACE_MS = 30_000;
+
   constructor(store: CoworkStore, engineManager: OpenClawEngineManager) {
     super();
     this.store = store;
@@ -988,6 +1000,13 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       bufferedAgentPayloads: [],
     });
     this.sessionIdByRunId.set(runId, sessionId);
+
+    // Start client-side timeout watchdog.
+    // OpenClaw gateway has a known issue where embedded run timeouts may not
+    // produce a WS abort/final event (the subscription is torn down before the
+    // lifecycle event fires). This timer fires slightly after the server-side
+    // timeout to recover the UI from a stuck "running" state.
+    this.startTurnTimeoutWatchdog(sessionId);
 
     const client = this.requireGatewayClient();
     try {
@@ -2287,6 +2306,14 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private handleChatAborted(sessionId: string, turn: ActiveTurn): void {
     this.store.updateSession(sessionId, { status: 'idle' });
     if (!turn.stopRequested) {
+      // The run was aborted without user request — most likely a timeout.
+      // Add a visible hint so the user knows the task was interrupted.
+      const hintMessage = this.store.addMessage(sessionId, {
+        type: 'assistant',
+        content: t('taskTimedOut'),
+        metadata: { isTimeout: true },
+      });
+      this.emit('message', sessionId, hintMessage);
       this.emit('complete', sessionId, turn.runId);
     }
     const abortedSessionKey = turn.sessionKey;
@@ -3174,6 +3201,11 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private cleanupSessionTurn(sessionId: string): void {
     const turn = this.activeTurns.get(sessionId);
     if (turn) {
+      // Clear client-side timeout watchdog
+      if (turn.timeoutTimer) {
+        clearTimeout(turn.timeoutTimer);
+        turn.timeoutTimer = undefined;
+      }
       // Cancel any pending throttled messageUpdate timer for this turn
       if (turn.assistantMessageId) {
         this.clearPendingMessageUpdate(turn.assistantMessageId);
@@ -3192,6 +3224,27 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // turn of a session (or when it actually changes).  Cleanup happens in
     // onSessionDeleted() when the session is removed entirely.
     this.reCreatedChannelSessionIds.delete(sessionId);
+  }
+
+  /**
+   * Start a client-side timeout watchdog for a turn.
+   * Fires after the server-side timeout + grace period, recovering the UI
+   * if the gateway fails to deliver the abort/final event.
+   */
+  private startTurnTimeoutWatchdog(sessionId: string): void {
+    const turn = this.activeTurns.get(sessionId);
+    if (!turn) return;
+    const timeoutMs = this.agentTimeoutSeconds * 1000
+      + OpenClawRuntimeAdapter.CLIENT_TIMEOUT_GRACE_MS;
+    turn.timeoutTimer = setTimeout(() => {
+      const currentTurn = this.activeTurns.get(sessionId);
+      if (!currentTurn || currentTurn.turnToken !== turn.turnToken) return;
+      console.warn(
+        `[OpenClawRuntime] Client-side timeout watchdog fired for session ${sessionId}, `
+        + `runId=${currentTurn.runId} after ${timeoutMs}ms — gateway did not deliver abort event`,
+      );
+      this.handleChatAborted(sessionId, currentTurn);
+    }, timeoutMs);
   }
 
   /**
@@ -3277,6 +3330,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       this.sessionIdByRunId.set(runId, sessionId);
     }
     this.store.updateSession(sessionId, { status: 'running' });
+    this.startTurnTimeoutWatchdog(sessionId);
 
     // For channel sessions, prefetch user messages before streaming starts
     if (isChannel) {

@@ -434,6 +434,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     noFolderSelected: '未选择文件夹',
     coworkSelectFolderFirst: '请选择任务目录后再提交',
     noRecentFolders: '暂无最近文件夹',
+    folderDriveRootNotAllowed: '不支持使用磁盘根目录作为工作目录，请选择一个子文件夹（例如 D:\\Projects）。',
     coworkOpenFolder: '打开文件夹',
 
     // Cowork 错误消息
@@ -449,6 +450,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorRateLimit: '请求过于频繁，请稍后再试。',
     coworkErrorContentFiltered: '内容未通过安全审核，请修改后重试。',
     coworkErrorServerError: '服务端出现错误，请稍后重试。',
+    coworkErrorSessionStartFailed: '会话启动失败：{error}',
+    coworkErrorSessionContinueFailed: '发送消息失败：{error}',
 
     // Skills
     skills: '技能',
@@ -1381,6 +1384,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     noFolderSelected: 'No folder selected',
     coworkSelectFolderFirst: 'Please select a task folder before submitting',
     noRecentFolders: 'No recent folders',
+    folderDriveRootNotAllowed: 'Drive root directories are not supported as working directories. Please select a subfolder (e.g. D:\\Projects).',
     coworkOpenFolder: 'Open folder',
 
     // Cowork error messages
@@ -1396,6 +1400,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorRateLimit: 'Too many requests. Please try again later.',
     coworkErrorContentFiltered: 'Content did not pass the safety review. Please modify and try again.',
     coworkErrorServerError: 'Server error occurred. Please try again later.',
+    coworkErrorSessionStartFailed: 'Failed to start session: {error}',
+    coworkErrorSessionContinueFailed: 'Failed to send message: {error}',
 
     // Skills
     skills: 'Skills',
