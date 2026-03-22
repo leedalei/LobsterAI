@@ -1122,10 +1122,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
           }));
 
           setMinimaxOAuthPhase({ kind: 'success' });
-<<<<<<< HEAD
-=======
           setTimeout(() => setMinimaxOAuthPhase({ kind: 'idle' }), 1500);
->>>>>>> 0e6c3a9 (feat: add MiniMax Portal OAuth support, including OAuth constants, state management, and UI components)
           return;
         }
 
@@ -1151,10 +1148,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
       minimax: {
         ...prev.minimax,
         apiKey: '',
-<<<<<<< HEAD
         authType: 'apikey',
-=======
->>>>>>> 0e6c3a9 (feat: add MiniMax Portal OAuth support, including OAuth constants, state management, and UI components)
         oauthRefreshToken: undefined,
         oauthTokenExpiresAt: undefined,
       },
