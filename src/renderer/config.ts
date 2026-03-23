@@ -102,6 +102,8 @@ export interface AppConfig {
         expires: number;
         resourceUrl?: string;
       };
+      /** OAuth 专用 Base URL（与 API Key 的 baseUrl 独立） */
+      oauthBaseUrl?: string;
       /** 是否使用OAuth方式而非API Key */
       useOAuth?: boolean;
       models?: Array<{
@@ -206,6 +208,14 @@ export interface AppConfig {
       baseUrl: string;
       apiFormat?: 'anthropic' | 'openai';
       codingPlanEnabled?: boolean;
+      oauthCredentials?: {
+        access: string;
+        refresh: string;
+        expires: number;
+        resourceUrl?: string;
+      };
+      oauthBaseUrl?: string;
+      useOAuth?: boolean;
       models?: Array<{
         id: string;
         name: string;
@@ -339,6 +349,7 @@ export const defaultConfig: AppConfig = {
       enabled: false,
       apiKey: '',
       baseUrl: 'https://dashscope.aliyuncs.com/apps/anthropic',
+      oauthBaseUrl: 'https://portal.qwen.ai/v1',
       apiFormat: 'anthropic',
       codingPlanEnabled: false,
       models: [

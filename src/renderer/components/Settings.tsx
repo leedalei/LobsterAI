@@ -767,10 +767,19 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
           return Object.fromEntries(
             Object.entries(merged).map(([providerKey, providerConfig]) => {
-              const models = providerConfig.models?.map(model => ({
-                ...model,
-                supportsImage: model.supportsImage ?? false,
-              }));
+              const models = providerConfig.models?.map((model, idx) => {
+                let id = model.id;
+                // Fix corrupted model IDs from previous OAuth mutation bug
+                if (providerKey === 'qwen' && (id === 'vision-model' || id === 'coder-model')) {
+                  const defaultModel = defaultConfig.providers?.qwen?.models?.[idx];
+                  id = defaultModel?.id || (model.supportsImage ? 'qwen3.5-plus' : 'qwen3-coder-plus');
+                }
+                return {
+                  ...model,
+                  id,
+                  supportsImage: model.supportsImage ?? false,
+                };
+              });
               return [
                 providerKey,
                 {
@@ -975,8 +984,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
             oauthCredentials: result.data,
             // Don't clear API key - let both coexist
             // Don't change enabled state - keep current setting
-            // Set appropriate base URL only if not set
-            baseUrl: prev.qwen.baseUrl || result?.data?.resourceUrl || 'https://portal.qwen.ai/v1',
+            // Store OAuth base URL separately so it doesn't pollute API Key's baseUrl
+            oauthBaseUrl: (prev.qwen as any).oauthBaseUrl || result?.data?.resourceUrl || 'https://portal.qwen.ai/v1',
           },
         }));
         setQwenOAuthProgress(i18nService.t('qwenOAuthSuccess'));
@@ -1480,19 +1489,25 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     setIsTestResultModalOpen(false);
     setTestResult(null);
 
-    if (providerRequiresApiKey(testingProvider) && !providerConfig.apiKey) {
+    // Check if provider has valid authentication (API Key or OAuth for Qwen)
+    const hasValidAuth = providerConfig.apiKey || 
+      (testingProvider === 'qwen' && (providerConfig as any).oauthCredentials);
+    
+    if (providerRequiresApiKey(testingProvider) && !hasValidAuth) {
       showTestResultModal({ success: false, message: i18nService.t('apiKeyRequired') }, testingProvider);
       setIsTesting(false);
       return;
     }
 
-    // 获取第一个可用模型
-    const firstModel = providerConfig.models?.[0];
-    if (!firstModel) {
+    // 获取第一个可用模型 - use a shallow copy to avoid mutating state
+    const originalModel = providerConfig.models?.[0];
+    if (!originalModel) {
       showTestResultModal({ success: false, message: i18nService.t('noModelsConfigured') }, testingProvider);
       setIsTesting(false);
       return;
     }
+
+    const firstModel = { ...originalModel };
 
     try {
       let response: Awaited<ReturnType<typeof window.electron.api.fetch>>;
@@ -1537,12 +1552,108 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
         }
       }
       
-      const normalizedBaseUrl = effectiveBaseUrl.replace(/\/+$/, '');
+      let normalizedBaseUrl = effectiveBaseUrl.replace(/\/+$/, '');
       // 统一为两种协议格式：
       // - anthropic: /v1/messages
       // - openai provider: /v1/responses
       // - other openai-compatible providers: /v1/chat/completions
       const useAnthropicFormat = effectiveApiFormat === 'anthropic';
+
+      // Determine effective API key and OAuth-specific settings
+      let effectiveApiKey = providerConfig.apiKey;
+      let oauthBaseUrl = null;
+      
+      // For Qwen, check if we should use OAuth (when on OAuth tab and have credentials)
+      if (testingProvider === 'qwen' && qwenAuthTab === 'oauth' && (providerConfig as any).oauthCredentials) {
+        const oauthCreds = (providerConfig as any).oauthCredentials;
+        
+        // Check if token is expired and try to refresh
+        if (Date.now() >= oauthCreds.expires) {
+          if (oauthCreds.refresh) {
+            try {
+              console.log('Token过期，尝试自动刷新...');
+              const refreshResult = await window.electron.qwen.oauthRefresh(oauthCreds.refresh);
+              
+              if (refreshResult.success && refreshResult.data) {
+                // Update the providers config with new token
+                setProviders(prev => ({
+                  ...prev,
+                  qwen: {
+                    ...prev.qwen,
+                    oauthCredentials: refreshResult.data,
+                  },
+                }));
+                
+                // Use the new token for testing
+                effectiveApiKey = refreshResult.data.access;
+                console.log('Token刷新成功，继续测试连接');
+              } else {
+                showTestResultModal({ success: false, message: 'OAuth token已过期且刷新失败，请重新登录' }, testingProvider);
+                setIsTesting(false);
+                return;
+              }
+            } catch (error) {
+              console.error('Token刷新失败:', error);
+              showTestResultModal({ success: false, message: 'OAuth token已过期且刷新失败，请重新登录' }, testingProvider);
+              setIsTesting(false);
+              return;
+            }
+          } else {
+            showTestResultModal({ success: false, message: 'OAuth token已过期，请重新登录' }, testingProvider);
+            setIsTesting(false);
+            return;
+          }
+        }
+        
+        effectiveApiKey = oauthCreds.access;
+        
+        // Debug: Log OAuth test info
+        console.log('OAuth测试连接信息:', {
+          accessToken: effectiveApiKey?.slice(0, 20) + '...',
+          resourceUrl: oauthCreds.resourceUrl,
+          expires: new Date(oauthCreds.expires).toLocaleString(),
+          isExpired: Date.now() >= oauthCreds.expires
+        });
+        
+        // For OAuth, use the resourceUrl if available and switch to OpenAI format
+        if (oauthCreds.resourceUrl) {
+          // Normalize OAuth base URL similar to normalizeQwenBaseUrl
+          const raw = oauthCreds.resourceUrl.trim();
+          const withProtocol = raw.startsWith("http") ? raw : `https://${raw}`;
+          oauthBaseUrl = withProtocol.endsWith("/v1") ? withProtocol : `${withProtocol.replace(/\/+$/, "")}/v1`;
+          effectiveApiFormat = 'openai'; // OAuth endpoints use OpenAI format
+          effectiveBaseUrl = oauthBaseUrl; // Use OAuth base URL
+          
+          console.log('OAuth URL构建过程:', {
+            原始URL: oauthCreds.resourceUrl,
+            添加协议后: withProtocol,
+            最终URL: oauthBaseUrl,
+            使用的effectiveBaseUrl: effectiveBaseUrl
+          });
+          
+          // Re-compute normalizedBaseUrl after OAuth override
+          normalizedBaseUrl = effectiveBaseUrl.replace(/\/+$/, '');
+          
+          // Map model ID for OAuth compatibility
+          if (firstModel) {
+            if (firstModel.supportsImage) {
+              firstModel.id = 'vision-model';
+            } else {
+              firstModel.id = 'coder-model';
+            }
+          }
+        }
+      } else if (testingProvider === 'qwen' && qwenAuthTab === 'apikey') {
+        // Use regular API Key mode
+        effectiveApiKey = providerConfig.apiKey;
+        // Ensure model ID is not an OAuth-mapped name (vision-model/coder-model)
+        // This can happen if a previous OAuth test mutated the model in state and it got persisted
+        if (firstModel.id === 'vision-model' || firstModel.id === 'coder-model') {
+          // Restore from defaultConfig's first qwen model
+          const defaultQwenModel = defaultConfig.providers?.qwen?.models?.[0];
+          firstModel.id = defaultQwenModel?.id || 'qwen3.5-plus';
+        }
+      }
 
       if (useAnthropicFormat) {
         const anthropicUrl = normalizedBaseUrl.endsWith('/v1')
@@ -1552,7 +1663,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
           url: anthropicUrl,
           method: 'POST',
           headers: {
-            'x-api-key': providerConfig.apiKey,
+            'x-api-key': effectiveApiKey,
             'anthropic-version': '2023-06-01',
             'Content-Type': 'application/json',
           },
@@ -1570,8 +1681,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
         };
-        if (providerConfig.apiKey) {
-          headers.Authorization = `Bearer ${providerConfig.apiKey}`;
+        if (effectiveApiKey) {
+          headers.Authorization = `Bearer ${effectiveApiKey}`;
         }
         const openAIRequestBody: Record<string, unknown> = useResponsesApi
           ? {
@@ -2478,7 +2589,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                               : 'text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-text dark:hover:text-claude-darkText'
                           }`}
                         >
-                          {i18nService.t('qwenOAuthTab') || 'OAuth 登录'}
+                          {i18nService.t('qwenOAuthTab')}
                           {providers.qwen.oauthCredentials && (
                             <span className="ml-1 inline-block w-1.5 h-1.5 bg-green-500 rounded-full"></span>
                           )}
@@ -2606,10 +2717,14 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                         ? (getEffectiveApiFormat('zhipu', providers.zhipu.apiFormat) === 'anthropic'
                             ? 'https://open.bigmodel.cn/api/anthropic'
                             : 'https://open.bigmodel.cn/api/coding/paas/v4')
-                        : activeProvider === 'qwen' && providers.qwen.codingPlanEnabled
+                        : activeProvider === 'qwen' && qwenAuthTab === 'apikey' && providers.qwen.codingPlanEnabled
                           ? (getEffectiveApiFormat('qwen', providers.qwen.apiFormat) === 'anthropic'
                               ? 'https://coding.dashscope.aliyuncs.com/apps/anthropic'
                               : 'https://coding.dashscope.aliyuncs.com/v1')
+                          : activeProvider === 'qwen' && qwenAuthTab === 'oauth'
+                            ? ((providers.qwen as any).oauthBaseUrl || 'https://portal.qwen.ai/v1')
+                          : activeProvider === 'qwen' && qwenAuthTab === 'apikey'
+                            ? (providers.qwen.baseUrl || getProviderDefaultBaseUrl('qwen', getEffectiveApiFormat('qwen', providers.qwen.apiFormat)) || 'https://dashscope.aliyuncs.com/apps/anthropic')
                           : activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled
                             ? (getEffectiveApiFormat('volcengine', providers.volcengine.apiFormat) === 'anthropic'
                                 ? 'https://ark.cn-beijing.volces.com/api/coding'
@@ -2620,16 +2735,36 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                                   : 'https://api.kimi.com/coding/v1')
                               : providers[activeProvider].baseUrl
                     }
-                    onChange={(e) => handleProviderConfigChange(activeProvider, 'baseUrl', e.target.value)}
+                    onChange={(e) => {
+                      if (activeProvider === 'qwen' && qwenAuthTab === 'oauth') {
+                        handleProviderConfigChange(activeProvider, 'oauthBaseUrl', e.target.value);
+                      } else {
+                        handleProviderConfigChange(activeProvider, 'baseUrl', e.target.value);
+                      }
+                    }}
                     disabled={isBaseUrlLocked}
                     className={`block w-full rounded-xl bg-claude-surfaceInset dark:bg-claude-darkSurfaceInset dark:border-claude-darkBorder border-claude-border border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-8 text-xs ${isBaseUrlLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    placeholder={getProviderDefaultBaseUrl(activeProvider, getEffectiveApiFormat(activeProvider, providers[activeProvider].apiFormat)) || defaultConfig.providers?.[activeProvider]?.baseUrl || i18nService.t('baseUrlPlaceholder')}
+                    placeholder={
+                      activeProvider === 'qwen' && qwenAuthTab === 'oauth'
+                        ? 'https://portal.qwen.ai/v1'
+                        : activeProvider === 'qwen' && qwenAuthTab === 'apikey'
+                          ? 'https://dashscope.aliyuncs.com/apps/anthropic'
+                          : getProviderDefaultBaseUrl(activeProvider, getEffectiveApiFormat(activeProvider, providers[activeProvider].apiFormat)) || defaultConfig.providers?.[activeProvider]?.baseUrl || i18nService.t('baseUrlPlaceholder')
+                    }
                   />
-                  {providers[activeProvider].baseUrl && !isBaseUrlLocked && (
+                  {((activeProvider === 'qwen' && qwenAuthTab === 'oauth' && (providers.qwen as any).oauthBaseUrl) || 
+                    (!(activeProvider === 'qwen' && qwenAuthTab === 'oauth') && providers[activeProvider].baseUrl)) && 
+                   !isBaseUrlLocked && (
                     <div className="absolute right-2 inset-y-0 flex items-center">
                       <button
                         type="button"
-                        onClick={() => handleProviderConfigChange(activeProvider, 'baseUrl', '')}
+                        onClick={() => {
+                          if (activeProvider === 'qwen' && qwenAuthTab === 'oauth') {
+                            handleProviderConfigChange(activeProvider, 'oauthBaseUrl', '');
+                          } else {
+                            handleProviderConfigChange(activeProvider, 'baseUrl', '');
+                          }
+                        }}
                         className="p-0.5 rounded text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-accent transition-colors"
                         title={i18nService.t('clear') || 'Clear'}
                       >
@@ -2843,7 +2978,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                 <button
                   type="button"
                   onClick={handleTestConnection}
-                  disabled={isTesting || (providerRequiresApiKey(activeProvider) && !providers[activeProvider].apiKey)}
+                  disabled={isTesting || (providerRequiresApiKey(activeProvider) && !providers[activeProvider].apiKey && !(activeProvider === 'qwen' && (providers.qwen as any).oauthCredentials))}
                   className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-xl border dark:border-claude-darkBorder border-claude-border dark:text-claude-darkText text-claude-text dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
                 >
                   <SignalIcon className="h-3.5 w-3.5 mr-1.5" />
