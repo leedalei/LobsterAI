@@ -14,6 +14,7 @@ import { ensurePythonPipReady, ensurePythonRuntimeReady } from './pythonRuntime'
 import { isDeleteCommand, isDangerousCommand } from './commandSafety';
 import { isQuestionLikeMemoryText, type CoworkMemoryGuardLevel } from './coworkMemoryExtractor';
 import { SCHEDULED_TASK_SWITCH_MESSAGE } from './scheduledTaskEnginePrompt';
+import { setCoworkProxySessionId } from './coworkOpenAICompatProxy';
 import { z } from 'zod';
 
 const ATTACHMENT_LINE_RE = /^\s*(?:[-*]\s*)?(输入文件|input\s*file)\s*[:：]\s*(.+?)\s*$/i;
@@ -1517,6 +1518,7 @@ export class CoworkRunner extends EventEmitter {
         effectivePrompt = this.injectLocalHistoryPrompt(sessionId, prompt, effectivePrompt);
       }
 
+      setCoworkProxySessionId(sessionId);
       await this.runClaudeCode(activeSession, effectivePrompt, sessionCwd, effectiveSystemPrompt, options.imageAttachments);
     } catch (error) {
       console.error('Cowork session error:', error);
@@ -1602,6 +1604,7 @@ export class CoworkRunner extends EventEmitter {
     try {
       const promptPrefix = this.buildPromptPrefix();
       const effectivePrompt = promptPrefix ? `${promptPrefix}\n\n---\n\n${prompt}` : prompt;
+      setCoworkProxySessionId(sessionId);
       await this.runClaudeCode(activeSession, effectivePrompt, sessionCwd, effectiveSystemPrompt, options.imageAttachments);
     } catch (error) {
       console.error('Cowork continue error:', error);
@@ -1618,6 +1621,7 @@ export class CoworkRunner extends EventEmitter {
     }
     this.clearPendingPermissions(sessionId);
     this.store.updateSession(sessionId, { status: 'idle' });
+    setCoworkProxySessionId(null);
   }
 
   onSessionDeleted(sessionId: string): void {

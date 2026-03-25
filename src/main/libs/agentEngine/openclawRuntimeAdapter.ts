@@ -29,6 +29,7 @@ import {
 } from '../openclawHistory';
 import { buildOpenClawLocalTimeContextPrompt } from '../openclawLocalTimeContextPrompt';
 import { isDangerousCommand, getCommandDangerLevel } from '../commandSafety';
+import { setCoworkProxySessionId } from '../coworkOpenAICompatProxy';
 import { OPENCLAW_AGENT_TIMEOUT_SECONDS } from '../openclawConfigSync';
 import { t } from '../../i18n';
 
@@ -106,6 +107,8 @@ type ActiveTurn = {
   committedAssistantText: string;
   currentAssistantSegmentText: string;
   currentText: string;
+  /** Highest text length from agent assistant events (immune to chat delta noise). */
+  agentAssistantTextLength: number;
   currentContentText: string;
   currentContentBlocks: string[];
   sawNonTextContentBlocks: boolean;
@@ -1002,6 +1005,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.rememberSessionKey(sessionId, sessionKey);
 
     this.store.updateSession(sessionId, { status: 'running' });
+    setCoworkProxySessionId(sessionId);
     await this.ensureGatewayClientReady();
     this.startChannelPolling();
 
@@ -1026,6 +1030,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       committedAssistantText: '',
       currentAssistantSegmentText: '',
       currentText: '',
+      agentAssistantTextLength: 0,
       currentContentText: '',
       currentContentBlocks: [],
       sawNonTextContentBlocks: false,
@@ -1049,6 +1054,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
     const client = this.requireGatewayClient();
     try {
+      console.log('[OpenClawRuntime] chat.send params:', { sessionKey, messageLength: outboundMessage.length, runId });
       const attachments = options.imageAttachments?.length
         ? options.imageAttachments.map((img) => ({
           type: 'image',
@@ -1630,6 +1636,9 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     }
 
     if (event.event === 'agent') {
+      // Process assistant text updates here (before handleAgentEvent) because
+      // handleAgentEvent may enqueue events when sessionId mapping isn't ready.
+      this.processAgentAssistantText(event.payload);
       this.handleAgentEvent(event.payload, event.seq);
       return;
     }
@@ -1935,10 +1944,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       this.probeBrowserControlService(toolCallId, phase);
     }
 
-    if (phase === 'start') {
-      this.splitAssistantSegmentBeforeTool(turn);
-    }
-
     if (!turn.toolUseMessageIdByToolCallId.has(toolCallId)) {
       const toolUseMessage = this.store.addMessage(sessionId, {
         type: 'tool_use',
@@ -2175,25 +2180,91 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     return normalizedFullText;
   }
 
-  private splitAssistantSegmentBeforeTool(turn: ActiveTurn): void {
-    if (!turn.assistantMessageId) {
+  /**
+   * Process agent assistant-stream text directly from handleGatewayEvent.
+   * This bypasses handleAgentEvent's session resolution (which may enqueue events),
+   * ensuring text updates and reset detection always work.
+   */
+  private processAgentAssistantText(payload: unknown): void {
+    if (!isRecord(payload)) return;
+    const p = payload as Record<string, unknown>;
+    if (p.stream !== 'assistant') return;
+
+    const dataField = isRecord(p.data) ? p.data as Record<string, unknown> : p;
+    const text = typeof dataField.text === 'string' ? dataField.text : '';
+
+    const runId = typeof p.runId === 'string' ? p.runId.trim() : '';
+    const sessionId = runId ? this.sessionIdByRunId.get(runId) : undefined;
+    const turn = sessionId ? this.activeTurns.get(sessionId) : undefined;
+
+    if (!text || !turn || !sessionId) {
+      if (text) {
+        console.debug('[Debug:processAssistant] skipped: text.len:', text.length, 'runId:', runId.slice(0, 8), 'sid:', !!sessionId, 'turn:', !!turn);
+      }
       return;
     }
 
-    const segmentText = turn.currentAssistantSegmentText.trim();
-    if (segmentText) {
-      const committedCandidate = `${turn.committedAssistantText}${segmentText}`;
-      const fullText = turn.currentText.trim();
-      if (fullText && fullText.startsWith(committedCandidate)) {
-        turn.committedAssistantText = committedCandidate;
-      } else {
-        turn.committedAssistantText = committedCandidate;
-      }
-    } else {
-      const fullText = turn.currentText.trim();
-      if (fullText && fullText.length > turn.committedAssistantText.length) {
-        turn.committedAssistantText = fullText;
-      }
+    // Detect text reset: new model call starts → text length drops significantly.
+    // Only trigger when hwm is meaningful (> 5 chars) to avoid false positives
+    // from early chat delta / agent event interleaving.
+    if (text.length < turn.agentAssistantTextLength
+        && turn.agentAssistantTextLength > 5
+        && turn.assistantMessageId) {
+      console.debug('[Debug:textReset] detected:', turn.agentAssistantTextLength, '->',
+        text.length, 'splitting. prevText:', turn.currentText.slice(0, 80));
+      this.splitAssistantSegmentBeforeTool(sessionId, turn);
+      turn.agentAssistantTextLength = 0;
+    }
+
+    // Track high-water mark.
+    turn.agentAssistantTextLength = Math.max(turn.agentAssistantTextLength, text.length);
+
+    // Update turn text state and push to store.
+    turn.currentText = text;
+    turn.currentAssistantSegmentText = this.resolveAssistantSegmentText(turn, text);
+
+    if (!turn.assistantMessageId && turn.currentAssistantSegmentText) {
+      // Create a new message for the new text segment (after split).
+      const assistantMessage = this.store.addMessage(sessionId, {
+        type: 'assistant',
+        content: turn.currentAssistantSegmentText,
+        metadata: { isStreaming: true, isFinal: false },
+      });
+      turn.assistantMessageId = assistantMessage.id;
+      this.emit('message', sessionId, assistantMessage);
+    } else if (turn.assistantMessageId && turn.currentAssistantSegmentText) {
+      this.store.updateMessage(sessionId, turn.assistantMessageId, {
+        content: turn.currentAssistantSegmentText,
+        metadata: { isStreaming: true, isFinal: false },
+      });
+      this.throttledEmitMessageUpdate(sessionId, turn.assistantMessageId, turn.currentAssistantSegmentText);
+    }
+  }
+
+  private splitAssistantSegmentBeforeTool(sessionId: string, turn: ActiveTurn): void {
+    if (!turn.assistantMessageId) return;
+    const messageId = turn.assistantMessageId;
+
+    // Committed text: use agentAssistantTextLength as the reliable segment length,
+    // since currentText/currentAssistantSegmentText may be overwritten by chat deltas.
+    // Read the actual content from the store (which was updated by processAgentAssistantText).
+    const session = this.store.getSession(sessionId);
+    const currentMsg = session?.messages.find((m) => m.id === messageId);
+    const storeContent = currentMsg?.content?.trim() || '';
+
+    if (storeContent) {
+      turn.committedAssistantText = `${turn.committedAssistantText}${storeContent}`;
+    }
+
+    // Flush pending throttled update and mark the message as final.
+    // Don't overwrite the content — the store already has the correct text
+    // from processAgentAssistantText's real-time updates.
+    this.clearPendingMessageUpdate(messageId);
+    this.store.updateMessage(sessionId, messageId, {
+      metadata: { isStreaming: false, isFinal: true },
+    });
+    if (storeContent) {
+      this.emit('messageUpdate', sessionId, messageId, storeContent);
     }
 
     turn.assistantMessageId = null;
@@ -2278,6 +2349,15 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     turn.currentAssistantSegmentText = finalSegmentText;
 
     if (turn.assistantMessageId) {
+      // Flush any pending throttled update and force-emit the latest store content
+      // so the renderer sees the final text even if the last throttled emit was skipped.
+      this.clearPendingMessageUpdate(turn.assistantMessageId);
+      const storeSession = this.store.getSession(sessionId);
+      const storeMsg = storeSession?.messages.find((m) => m.id === turn.assistantMessageId);
+      if (storeMsg?.content) {
+        this.emit('messageUpdate', sessionId, turn.assistantMessageId, storeMsg.content);
+      }
+
       const persistedSegmentText = finalSegmentText || previousSegmentText;
       if (persistedSegmentText) {
         this.store.updateMessage(sessionId, turn.assistantMessageId, {
@@ -2362,6 +2442,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   private handleChatError(sessionId: string, turn: ActiveTurn, payload: ChatEventPayload): void {
+    console.log('[OpenClawRuntime] handleChatError payload:', JSON.stringify(payload).slice(0, 1000));
     let errorMessage = payload.errorMessage?.trim() || 'OpenClaw run failed';
 
     // Detect model API errors that are likely caused by unsupported image content
@@ -2372,6 +2453,13 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
     const erroredSessionKey = turn.sessionKey;
     this.store.updateSession(sessionId, { status: 'error' });
+    // Persist error message to SQLite so it survives session switches
+    const errorMsg = this.store.addMessage(sessionId, {
+      type: 'system',
+      content: errorMessage,
+      metadata: { error: errorMessage },
+    });
+    this.emit('message', sessionId, errorMsg);
     this.emit('error', sessionId, errorMessage);
     this.cleanupSessionTurn(sessionId);
     this.rejectTurn(sessionId, new Error(errorMessage));
@@ -2670,6 +2758,9 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       console.log('[Debug:syncFinal] canonicalText length:', canonicalText.length, 'assistantMessageId:', turn.assistantMessageId);
 
       const canonicalSegmentText = this.resolveAssistantSegmentText(turn, canonicalText);
+      console.debug('[Debug:syncFinal] canonicalSegmentText length:', canonicalSegmentText.length,
+        'committed.length:', turn.committedAssistantText.length,
+        'segment:', canonicalSegmentText.slice(0, 80));
       turn.currentText = canonicalText;
       turn.currentAssistantSegmentText = canonicalSegmentText;
 
@@ -2701,9 +2792,13 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       const currentMessage = session?.messages.find((message) => message.id === turn.assistantMessageId);
       const currentText = currentMessage?.content.trim() ?? '';
       if (canonicalSegmentText === currentText) {
+        // Content matches but renderer may not have received the last throttled update.
+        // Force-emit so the UI shows the final text.
+        this.emit('messageUpdate', sessionId, turn.assistantMessageId, canonicalSegmentText);
         return;
       }
 
+      console.debug('[Debug:syncFinal] updating last segment:', currentText.length, '->', canonicalSegmentText.length);
       this.store.updateMessage(sessionId, turn.assistantMessageId, {
         content: canonicalSegmentText,
         metadata: {
@@ -3256,6 +3351,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       });
     }
     this.activeTurns.delete(sessionId);
+    setCoworkProxySessionId(null);
     // NOTE: Do NOT clear lastSystemPromptBySession here — it must persist
     // across turns so that the system prompt is only injected on the first
     // turn of a session (or when it actually changes).  Cleanup happens in
@@ -3355,6 +3451,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       committedAssistantText: '',
       currentAssistantSegmentText: '',
       currentText: '',
+      agentAssistantTextLength: 0,
       currentContentText: '',
       currentContentBlocks: [],
       sawNonTextContentBlocks: false,
