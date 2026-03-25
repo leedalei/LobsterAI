@@ -608,7 +608,7 @@ const MarkdownContent: React.FC<MarkdownContentProps> = ({
   return (
     <div className={`markdown-content text-[15px] leading-6 ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
         rehypePlugins={[rehypeKatex]}
         urlTransform={safeUrlTransform}
         components={components}
