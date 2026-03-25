@@ -315,6 +315,12 @@ interface IElectronAPI {
       pngBase64: string;
       defaultFileName?: string;
     }) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>;
+    saveSessionExport: (options: {
+      format: 'markdown' | 'pdf';
+      content: string;
+      htmlContent?: string;
+      defaultFileName?: string;
+    }) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>;
     respondToPermission: (options: { requestId: string; result: CoworkPermissionResult }) => Promise<{ success: boolean; error?: string }>;
     getConfig: () => Promise<{ success: boolean; config?: CoworkConfig; error?: string }>;
     setConfig: (config: CoworkConfigUpdate) => Promise<{ success: boolean; error?: string }>;

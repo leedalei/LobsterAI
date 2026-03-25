@@ -7,6 +7,7 @@ import type { Skill } from '../../types/skill';
 import CoworkPromptInput from './CoworkPromptInput';
 import MarkdownContent from '../MarkdownContent';
 import {
+  ArrowDownTrayIcon,
   CheckIcon,
   InformationCircleIcon,
   ShareIcon,
@@ -16,12 +17,18 @@ import {
 } from '@heroicons/react/24/outline';
 import { FolderIcon } from '@heroicons/react/24/solid';
 import { coworkService } from '../../services/cowork';
+import {
+  serializeSessionToExportHtml,
+  serializeSessionToMarkdown,
+  type CoworkExportFormat,
+} from '../../services/coworkExport';
 import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import ComposeIcon from '../icons/ComposeIcon';
 import PuzzleIcon from '../icons/PuzzleIcon';
 import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
 import PencilSquareIcon from '../icons/PencilSquareIcon';
 import TrashIcon from '../icons/TrashIcon';
+import CoworkExportDialog from './CoworkExportDialog';
 import WindowTitleBar from '../window/WindowTitleBar';
 import { getCompactFolderName } from '../../utils/path';
 import { getScheduledReminderDisplayText } from '../../../common/scheduledReminderText';
@@ -1313,6 +1320,8 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const actionButtonRef = useRef<HTMLButtonElement>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [isExportingImage, setIsExportingImage] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [isExportingSession, setIsExportingSession] = useState(false);
 
   // Rename states
   const [isRenaming, setIsRenaming] = useState(false);
@@ -1330,6 +1339,11 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
 
   useEffect(() => {
     setShouldAutoScroll(true);
+  }, [currentSession?.id]);
+
+  useEffect(() => {
+    setShowExportDialog(false);
+    setIsExportingSession(false);
   }, [currentSession?.id]);
 
   // Focus rename input when entering rename mode
@@ -1415,7 +1429,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       closeMenu();
       return;
     }
-    const menuHeight = 160;
+    const menuHeight = 196;
     const position = calculateMenuPosition(menuHeight);
     if (position) {
       setMenuPosition(position);
@@ -1646,6 +1660,50 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
         }
       })();
     });
+  };
+
+  const handleExportClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentSession) return;
+    closeMenu();
+    setShowExportDialog(true);
+  };
+
+  const handleCloseExportDialog = () => {
+    if (isExportingSession) return;
+    setShowExportDialog(false);
+  };
+
+  const handleConfirmExportDialog = async (fileName: string, format: CoworkExportFormat) => {
+    if (!currentSession) return;
+    setIsExportingSession(true);
+    try {
+      const result = await coworkService.saveSessionExport({
+        format,
+        content: serializeSessionToMarkdown(currentSession),
+        htmlContent: format === 'pdf' ? serializeSessionToExportHtml(currentSession) : undefined,
+        defaultFileName: fileName,
+      });
+
+      if (result.success && !result.canceled) {
+        setShowExportDialog(false);
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: i18nService.t('coworkExportSessionSuccess'),
+        }));
+        return;
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save session export');
+      }
+    } catch (error) {
+      console.error('Failed to export session markdown:', error);
+      window.dispatchEvent(new CustomEvent('app:showToast', {
+        detail: i18nService.t('coworkExportSessionFailed'),
+      }));
+    } finally {
+      setIsExportingSession(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -1975,6 +2033,15 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           </button>
           <button
             type="button"
+            onClick={handleExportClick}
+            disabled={isExportingSession}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm dark:text-claude-darkText text-claude-text hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ArrowDownTrayIcon className="h-4 w-4" />
+            {i18nService.t('coworkExportSession')}
+          </button>
+          <button
+            type="button"
             onClick={handleDeleteClick}
             className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-red-500 hover:bg-red-500/10 transition-colors"
           >
@@ -1983,6 +2050,14 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           </button>
         </div>
       )}
+
+      <CoworkExportDialog
+        isOpen={showExportDialog}
+        sessionTitle={currentSession.title}
+        isExporting={isExportingSession}
+        onClose={handleCloseExportDialog}
+        onConfirm={handleConfirmExportDialog}
+      />
 
       {/* Delete Confirmation Modal */}
       {showConfirmDelete && (

@@ -50,6 +50,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Skill manager errors
     skillErrNoSkillMd: '来源中未找到 SKILL.md',
+    coworkExportSaveDialogTitle: '导出会话',
+    coworkExportSaveDialogFilterName: 'Markdown 文件',
+    coworkExportSaveDialogFilterNamePdf: 'PDF 文件',
   },
   en: {
     // Tray menu
@@ -87,6 +90,9 @@ const translations: Record<LanguageType, Record<string, string>> = {
 
     // Skill manager errors
     skillErrNoSkillMd: 'No SKILL.md found in source',
+    coworkExportSaveDialogTitle: 'Export Session',
+    coworkExportSaveDialogFilterName: 'Markdown Files',
+    coworkExportSaveDialogFilterNamePdf: 'PDF Files',
   },
 };
 

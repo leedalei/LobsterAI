@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CoworkSessionSummary, CoworkSessionStatus } from '../../types/cowork';
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
 import PencilSquareIcon from '../icons/PencilSquareIcon';
 import TrashIcon from '../icons/TrashIcon';
@@ -18,6 +18,7 @@ interface CoworkSessionItemProps {
   onDelete: () => void;
   onTogglePin: (pinned: boolean) => void;
   onRename: (title: string) => void;
+  onExport: () => void;
   onToggleSelection: () => void;
   onEnterBatchMode: () => void;
 }
@@ -97,6 +98,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   onDelete,
   onTogglePin,
   onRename,
+  onExport,
   onToggleSelection,
   onEnterBatchMode,
 }) => {
@@ -116,18 +118,27 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
     }
   }, [isRenaming, session.title]);
 
-  const calculateMenuPosition = (height: number) => {
-    const rect = actionButtonRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    const menuWidth = 180;
+  const calculateMenuPosition = (height: number, anchor?: { x: number; y: number }) => {
     const padding = 8;
+    const menuWidth = 180;
+    const fallbackAnchor = anchor ?? (() => {
+      const rect = actionButtonRef.current?.getBoundingClientRect();
+      if (!rect) return null;
+      return { x: rect.right - menuWidth, y: rect.bottom + 8 };
+    })();
+    if (!fallbackAnchor) return null;
     const x = Math.min(
-      Math.max(padding, rect.right - menuWidth),
+      Math.max(padding, fallbackAnchor.x),
       window.innerWidth - menuWidth - padding
     );
-    const y = Math.min(rect.bottom + 8, window.innerHeight - height - padding);
+    const y = Math.min(
+      Math.max(padding, fallbackAnchor.y),
+      window.innerHeight - height - padding
+    );
     return { x, y };
   };
+
+  const getMenuHeight = () => (showBatchOption ? 192 : 156);
 
   const openMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -136,8 +147,18 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
       closeMenu();
       return;
     }
-    const menuHeight = showBatchOption ? 156 : 120;
-    const position = calculateMenuPosition(menuHeight);
+    const position = calculateMenuPosition(getMenuHeight());
+    if (position) {
+      setMenuPosition(position);
+    }
+    setShowConfirmDelete(false);
+  };
+
+  const openContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isRenaming || isBatchMode) return;
+    const position = calculateMenuPosition(getMenuHeight(), { x: e.clientX, y: e.clientY });
     if (position) {
       setMenuPosition(position);
     }
@@ -162,6 +183,12 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
     setShowConfirmDelete(false);
     setRenameValue(session.title);
     setMenuPosition(null);
+  };
+
+  const handleExportClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    closeMenu();
+    onExport();
   };
 
   const handleRenameSave = (e?: React.SyntheticEvent) => {
@@ -239,8 +266,8 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
 
   useEffect(() => {
     if (!menuPosition) return;
-    const menuHeight = showConfirmDelete ? 112 : (showBatchOption ? 156 : 120);
-    const position = calculateMenuPosition(menuHeight);
+    const menuHeight = showConfirmDelete ? 112 : getMenuHeight();
+    const position = calculateMenuPosition(menuHeight, menuPosition);
     if (position && (position.x !== menuPosition.x || position.y !== menuPosition.y)) {
       setMenuPosition(position);
     }
@@ -257,6 +284,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   const pinButtonLabel = session.pinned ? i18nService.t('coworkUnpinSession') : i18nService.t('coworkPinSession');
   const actionLabel = i18nService.t('coworkSessionActions');
   const renameLabel = i18nService.t('renameConversation');
+  const exportLabel = i18nService.t('coworkExportSession');
   const deleteLabel = i18nService.t('deleteSession');
   const relativeTime = formatRelativeTime(session.updatedAt);
   const showRunningIndicator = session.status === 'running';
@@ -267,6 +295,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
     const items = [
       { key: 'rename', label: renameLabel, onClick: handleRenameClick, tone: 'neutral' as const },
       { key: 'pin', label: pinButtonLabel, onClick: handleTogglePin, tone: 'neutral' as const },
+      { key: 'export', label: exportLabel, onClick: handleExportClick, tone: 'neutral' as const },
       { key: 'delete', label: deleteLabel, onClick: handleDeleteClick, tone: 'danger' as const },
     ];
     if (showBatchOption) {
@@ -276,8 +305,10 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   }, [
     batchLabel,
     deleteLabel,
+    exportLabel,
     handleBatchClick,
     handleDeleteClick,
+    handleExportClick,
     handleRenameClick,
     handleTogglePin,
     pinButtonLabel,
@@ -287,6 +318,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
 
   return (
     <div
+      onContextMenu={openContextMenu}
       onClick={() => {
         if (isRenaming) return;
         closeMenu();
@@ -418,6 +450,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
                   className={`h-4 w-4 ${session.pinned ? 'opacity-60' : ''}`}
                 />
               )}
+              {item.key === 'export' && <ArrowDownTrayIcon className="h-4 w-4" />}
               {item.key === 'delete' && <TrashIcon className="h-4 w-4" />}
               {item.label}
             </button>

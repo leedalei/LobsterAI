@@ -479,6 +479,41 @@ class CoworkService {
     return null;
   }
 
+  async getSessionSnapshot(sessionId: string): Promise<CoworkSession | null> {
+    const cowork = window.electron?.cowork;
+    if (!cowork) return null;
+
+    const result = await cowork.getSession(sessionId);
+    if (result.success && result.session) {
+      return result.session;
+    }
+
+    console.error('Failed to get session snapshot:', result.error);
+    return null;
+  }
+
+  async saveSessionExport(options: {
+    format: 'markdown' | 'pdf';
+    content: string;
+    htmlContent?: string;
+    defaultFileName?: string;
+  }): Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }> {
+    const cowork = window.electron?.cowork;
+    if (!cowork?.saveSessionExport) {
+      return { success: false, error: 'Cowork save export API not available' };
+    }
+
+    try {
+      const result = await cowork.saveSessionExport(options);
+      return result ?? { success: false, error: 'Failed to save session export' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save session export',
+      };
+    }
+  }
+
   async respondToPermission(requestId: string, result: CoworkPermissionResult): Promise<boolean> {
     const cowork = window.electron?.cowork;
     if (!cowork) return false;

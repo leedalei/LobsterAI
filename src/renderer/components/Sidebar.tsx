@@ -2,8 +2,14 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { coworkService } from '../services/cowork';
+import {
+  serializeSessionToExportHtml,
+  serializeSessionToMarkdown,
+  type CoworkExportFormat,
+} from '../services/coworkExport';
 import { i18nService } from '../services/i18n';
 import CoworkSessionList from './cowork/CoworkSessionList';
+import CoworkExportDialog from './cowork/CoworkExportDialog';
 import CoworkSearchModal from './cowork/CoworkSearchModal';
 import ComposeIcon from './icons/ComposeIcon';
 import ConnectorIcon from './icons/ConnectorIcon';
@@ -46,6 +52,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [exportTarget, setExportTarget] = useState<{ sessionId: string; title: string } | null>(null);
+  const [isExportingSession, setIsExportingSession] = useState(false);
   const isMac = window.electron.platform === 'darwin';
 
   useEffect(() => {
@@ -83,6 +91,55 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleRenameSession = async (sessionId: string, title: string) => {
     await coworkService.renameSession(sessionId, title);
   };
+
+  const handleOpenExportDialog = useCallback((sessionId: string, title: string) => {
+    setExportTarget({ sessionId, title });
+  }, []);
+
+  const handleCloseExportDialog = useCallback(() => {
+    if (isExportingSession) return;
+    setExportTarget(null);
+  }, [isExportingSession]);
+
+  const handleConfirmExport = useCallback(async (fileName: string, format: CoworkExportFormat) => {
+    if (!exportTarget) return;
+    setIsExportingSession(true);
+    try {
+      const session = await coworkService.getSessionSnapshot(exportTarget.sessionId);
+      if (!session) {
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: i18nService.t('coworkExportSessionLoadFailed'),
+        }));
+        return;
+      }
+
+      const result = await coworkService.saveSessionExport({
+        format,
+        content: serializeSessionToMarkdown(session),
+        htmlContent: format === 'pdf' ? serializeSessionToExportHtml(session) : undefined,
+        defaultFileName: fileName,
+      });
+
+      if (result.success && !result.canceled) {
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: i18nService.t('coworkExportSessionSuccess'),
+        }));
+        setExportTarget(null);
+        return;
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save session export');
+      }
+    } catch (error) {
+      console.error('Failed to export session:', error);
+      window.dispatchEvent(new CustomEvent('app:showToast', {
+        detail: i18nService.t('coworkExportSessionFailed'),
+      }));
+    } finally {
+      setIsExportingSession(false);
+    }
+  }, [exportTarget]);
 
   const handleEnterBatchMode = useCallback((sessionId: string) => {
     setIsBatchMode(true);
@@ -232,6 +289,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           onDeleteSession={handleDeleteSession}
           onTogglePin={handleTogglePin}
           onRenameSession={handleRenameSession}
+          onExportSession={handleOpenExportDialog}
           onToggleSelection={handleToggleSelection}
           onEnterBatchMode={handleEnterBatchMode}
         />
@@ -245,6 +303,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         onDeleteSession={handleDeleteSession}
         onTogglePin={handleTogglePin}
         onRenameSession={handleRenameSession}
+        onExportSession={handleOpenExportDialog}
+      />
+      <CoworkExportDialog
+        isOpen={!!exportTarget}
+        sessionTitle={exportTarget?.title ?? ''}
+        isExporting={isExportingSession}
+        onClose={handleCloseExportDialog}
+        onConfirm={handleConfirmExport}
       />
       {isBatchMode ? (
         <div className="px-3 pb-3 pt-1 flex items-center justify-between">

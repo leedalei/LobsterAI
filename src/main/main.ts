@@ -48,7 +48,7 @@ import { IMGatewayManager, IMPlatform, IMGatewayConfig } from './im';
 import { APP_NAME } from './appConstants';
 import { getSkillServiceManager } from './skillServices';
 import { createTray, destroyTray, updateTrayMenu } from './trayManager';
-import { setLanguage } from './i18n';
+import { setLanguage, t } from './i18n';
 import { isAutoLaunched, getAutoLaunchEnabled, setAutoLaunchEnabled } from './autoLaunchManager';
 import { McpStore } from './mcpStore';
 import { CronJobService } from './libs/cronJobService';
@@ -312,6 +312,108 @@ const savePngWithDialog = async (
   const outputPath = ensurePngFileName(saveResult.filePath);
   await fs.promises.writeFile(outputPath, pngData);
   return { success: true, canceled: false, path: outputPath };
+};
+
+const showExportSaveDialog = async (
+  webContents: WebContents,
+  defaultFileName: string | undefined,
+  options: {
+    titleKey: string;
+    filterNameKey: string;
+    extension: string;
+  },
+): Promise<{ canceled: boolean; filePath?: string }> => {
+  const normalizeExportFilePath = (value: string): string => {
+    const withoutExportExtensions = value.replace(/(\.(md|pdf))+$/i, '');
+    return `${withoutExportExtensions}.${options.extension}`;
+  };
+  const suggestedName = typeof defaultFileName === 'string' && defaultFileName.trim()
+    ? defaultFileName.trim()
+    : `cowork-session-${Date.now()}.${options.extension}`;
+  const sanitizedBaseName = path.basename(suggestedName)
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || `cowork-session-${Date.now()}`;
+  const normalizedFileName = normalizeExportFilePath(sanitizedBaseName);
+  const ownerWindow = BrowserWindow.fromWebContents(webContents);
+  const saveOptions = {
+    title: t(options.titleKey),
+    defaultPath: path.join(app.getPath('downloads'), normalizedFileName),
+    filters: [{ name: t(options.filterNameKey), extensions: [options.extension] }],
+  };
+  const saveResult = ownerWindow
+    ? await dialog.showSaveDialog(ownerWindow, saveOptions)
+    : await dialog.showSaveDialog(saveOptions);
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { canceled: true };
+  }
+
+  return {
+    canceled: false,
+    filePath: normalizeExportFilePath(saveResult.filePath),
+  };
+};
+
+const saveTextWithDialog = async (
+  webContents: WebContents,
+  content: string,
+  defaultFileName: string | undefined,
+  options: {
+    titleKey: string;
+    filterNameKey: string;
+    extension: string;
+  },
+): Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }> => {
+  const saveResult = await showExportSaveDialog(webContents, defaultFileName, options);
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { success: true, canceled: true };
+  }
+
+  const outputPath = saveResult.filePath;
+  await fs.promises.writeFile(outputPath, content, 'utf-8');
+  return { success: true, canceled: false, path: outputPath };
+};
+
+const savePdfWithDialog = async (
+  webContents: WebContents,
+  htmlContent: string,
+  defaultFileName?: string,
+): Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }> => {
+  const saveResult = await showExportSaveDialog(webContents, defaultFileName, {
+    titleKey: 'coworkExportSaveDialogTitle',
+    filterNameKey: 'coworkExportSaveDialogFilterNamePdf',
+    extension: 'pdf',
+  });
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { success: true, canceled: true };
+  }
+
+  const exportWindow = new BrowserWindow({
+    show: false,
+    width: 1024,
+    height: 1440,
+    backgroundColor: '#ffffff',
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  try {
+    await exportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    const pdfBuffer = await exportWindow.webContents.printToPDF({
+      printBackground: true,
+      preferCSSPageSize: true,
+    });
+    await fs.promises.writeFile(saveResult.filePath, pdfBuffer);
+    return { success: true, canceled: false, path: saveResult.filePath };
+  } finally {
+    if (!exportWindow.isDestroyed()) {
+      exportWindow.destroy();
+    }
+  }
 };
 
 const configureUserDataPath = (): void => {
@@ -2382,6 +2484,44 @@ if (!gotTheLock) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to save session image',
+      };
+    }
+  });
+
+  ipcMain.handle('cowork:session:saveExport', async (
+    event,
+    options: {
+      format: 'markdown' | 'pdf';
+      content: string;
+      htmlContent?: string;
+      defaultFileName?: string;
+    }
+  ) => {
+    try {
+      const format = options?.format === 'pdf' ? 'pdf' : 'markdown';
+      const content = typeof options?.content === 'string' ? options.content : '';
+      if (!content.trim() && format === 'markdown') {
+        return { success: false, error: 'Export content is required' };
+      }
+
+      if (format === 'pdf') {
+        const htmlContent = typeof options?.htmlContent === 'string' ? options.htmlContent : '';
+        if (!htmlContent.trim()) {
+          return { success: false, error: 'Export HTML content is required' };
+        }
+
+        return savePdfWithDialog(event.sender, htmlContent, options?.defaultFileName);
+      }
+
+      return saveTextWithDialog(event.sender, content, options?.defaultFileName, {
+        titleKey: 'coworkExportSaveDialogTitle',
+        filterNameKey: 'coworkExportSaveDialogFilterName',
+        extension: 'md',
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save session export',
       };
     }
   });

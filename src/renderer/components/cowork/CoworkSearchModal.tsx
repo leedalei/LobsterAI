@@ -16,6 +16,7 @@ interface CoworkSearchModalProps {
   onDeleteSession: (sessionId: string) => void;
   onTogglePin: (sessionId: string, pinned: boolean) => void;
   onRenameSession: (sessionId: string, title: string) => void;
+  onExportSession: (sessionId: string, title: string) => void;
 }
 
 const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
@@ -27,6 +28,7 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
   onDeleteSession,
   onTogglePin,
   onRenameSession,
+  onExportSession,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -61,6 +63,11 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
 
   const handleSelectSession = async (sessionId: string) => {
     await onSelectSession(sessionId);
+    onClose();
+  };
+
+  const handleExportSession = (sessionId: string, title: string) => {
+    onExportSession(sessionId, title);
     onClose();
   };
 
@@ -114,6 +121,7 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
               onDeleteSession={onDeleteSession}
               onTogglePin={onTogglePin}
               onRenameSession={onRenameSession}
+              onExportSession={handleExportSession}
               onToggleSelection={() => {}}
               onEnterBatchMode={() => {}}
             />
