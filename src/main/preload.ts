@@ -292,6 +292,10 @@ contextBridge.exposeInMainWorld('electron', {
     get: () => ipcRenderer.invoke('app:getAutoLaunch'),
     set: (enabled: boolean) => ipcRenderer.invoke('app:setAutoLaunch', enabled),
   },
+  preventSleep: {
+    get: () => ipcRenderer.invoke('app:getPreventSleep'),
+    set: (enabled: boolean) => ipcRenderer.invoke('app:setPreventSleep', enabled),
+  },
   appInfo: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getSystemLocale: () => ipcRenderer.invoke('app:getSystemLocale'),
@@ -397,6 +401,27 @@ contextBridge.exposeInMainWorld('electron', {
   },
   networkStatus: {
     send: (status: 'online' | 'offline') => ipcRenderer.send('network:status-change', status),
+  },
+  auth: {
+    login: (loginUrl?: string) => ipcRenderer.invoke('auth:login', { loginUrl }),
+    exchange: (code: string) => ipcRenderer.invoke('auth:exchange', { code }),
+    getUser: () => ipcRenderer.invoke('auth:getUser'),
+    getQuota: () => ipcRenderer.invoke('auth:getQuota'),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+    refreshToken: () => ipcRenderer.invoke('auth:refreshToken'),
+    getAccessToken: () => ipcRenderer.invoke('auth:getAccessToken'),
+    getModels: () => ipcRenderer.invoke('auth:getModels'),
+    getProfileSummary: () => ipcRenderer.invoke('auth:getProfileSummary'),
+    onCallback: (callback: (data: { code: string }) => void) => {
+      const handler = (_event: any, data: { code: string }) => callback(data);
+      ipcRenderer.on('auth:callback', handler);
+      return () => ipcRenderer.removeListener('auth:callback', handler);
+    },
+    onQuotaChanged: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('auth:quotaChanged', handler);
+      return () => ipcRenderer.removeListener('auth:quotaChanged', handler);
+    },
   },
   feishu: {
     install: {

@@ -218,6 +218,22 @@ interface McpMarketplaceData {
 
 import type { Agent, PresetAgent } from './agent';
 
+interface CreditItem {
+  type: 'subscription' | 'boost' | 'free';
+  label: string;
+  labelEn: string;
+  creditsRemaining: number;
+  expiresAt: string | null;
+}
+
+interface ProfileSummaryData {
+  id: number;
+  nickname: string;
+  avatarUrl: string | null;
+  totalCreditsRemaining: number;
+  creditItems: CreditItem[];
+}
+
 interface IElectronAPI {
   platform: string;
   arch: string;
@@ -370,6 +386,10 @@ interface IElectronAPI {
     get: () => Promise<{ enabled: boolean }>;
     set: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
   };
+  preventSleep: {
+    get: () => Promise<{ enabled: boolean }>;
+    set: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  };
   appInfo: {
     getVersion: () => Promise<string>;
     getSystemLocale: () => Promise<string>;
@@ -446,6 +466,19 @@ interface IElectronAPI {
   permissions: {
     checkCalendar: () => Promise<{ success: boolean; status?: string; error?: string; autoRequested?: boolean }>;
     requestCalendar: () => Promise<{ success: boolean; granted?: boolean; status?: string; error?: string }>;
+  };
+  auth: {
+    login: (loginUrl?: string) => Promise<{ success: boolean; error?: string }>;
+    exchange: (code: string) => Promise<{ success: boolean; user?: any; quota?: any; error?: string }>;
+    getUser: () => Promise<{ success: boolean; user?: any; quota?: any }>;
+    getQuota: () => Promise<{ success: boolean; quota?: any }>;
+    logout: () => Promise<{ success: boolean }>;
+    refreshToken: () => Promise<{ success: boolean; accessToken?: string }>;
+    getAccessToken: () => Promise<string | null>;
+    getModels: () => Promise<{ success: boolean; models?: Array<{ modelId: string; modelName: string; provider: string; apiFormat: string }> }>;
+    getProfileSummary: () => Promise<{ success: boolean; data?: ProfileSummaryData }>;
+    onCallback: (callback: (data: { code: string }) => void) => () => void;
+    onQuotaChanged: (callback: () => void) => () => void;
   };
   networkStatus: {
     send: (status: 'online' | 'offline') => void;
