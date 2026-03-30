@@ -1863,7 +1863,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // Try to resolve channel-originated sessions (e.g. Telegram via OpenClaw)
     if (!sessionId && sessionKey && this.channelSessionSync) {
       const channelSessionId = this.channelSessionSync.resolveOrCreateSession(sessionKey)
-        || (!this.heartbeatSessionKeys.has(sessionKey) && this.channelSessionSync.resolveOrCreateMainAgentSession(sessionKey))
         || this.channelSessionSync.resolveOrCreateCronSession(sessionKey)
         || null;
       console.log('[Debug:handleAgentEvent] channel resolve — channelSessionId:', channelSessionId);
@@ -2685,7 +2684,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // Try to resolve channel-originated sessions for approval requests
     if (!sessionId && sessionKey && this.channelSessionSync) {
       const channelSessionId = this.channelSessionSync.resolveOrCreateSession(sessionKey)
-        || (!this.heartbeatSessionKeys.has(sessionKey) && this.channelSessionSync.resolveOrCreateMainAgentSession(sessionKey))
         || this.channelSessionSync.resolveOrCreateCronSession(sessionKey)
         || null;
       if (channelSessionId) {
@@ -2769,7 +2767,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // Try to resolve channel-originated sessions
     if (sessionKey && this.channelSessionSync) {
       const channelSessionId = this.channelSessionSync.resolveOrCreateSession(sessionKey)
-        || (!this.heartbeatSessionKeys.has(sessionKey) && this.channelSessionSync.resolveOrCreateMainAgentSession(sessionKey))
         || this.channelSessionSync.resolveOrCreateCronSession(sessionKey)
         || null;
       if (channelSessionId) {
