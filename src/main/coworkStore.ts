@@ -805,13 +805,26 @@ export class CoworkStore {
         ROWID ASC
     `, [sessionId]);
 
-    return rows.map(row => ({
-      id: row.id,
-      type: row.type as CoworkMessageType,
-      content: row.content,
-      timestamp: row.created_at,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-    }));
+    return rows.map((row) => {
+      let metadata: Record<string, unknown> | undefined;
+      if (row.metadata) {
+        try {
+          metadata = JSON.parse(row.metadata);
+        } catch {
+          console.warn(
+            `[CoworkStore] corrupt metadata detected for message ${row.id} in session ${sessionId}, discarding metadata`,
+          );
+          metadata = undefined;
+        }
+      }
+      return {
+        id: row.id,
+        type: row.type as CoworkMessageType,
+        content: row.content,
+        timestamp: row.created_at,
+        metadata,
+      };
+    });
   }
 
   addMessage(sessionId: string, message: Omit<CoworkMessage, 'id' | 'timestamp'>): CoworkMessage {
