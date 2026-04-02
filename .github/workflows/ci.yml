@@ -65,16 +65,18 @@ jobs:
           restore-keys: npm-${{ runner.os }}-
       - run: npm install
       - name: Lint changed files only
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.ts' '*.tsx')
           else
-            FILES=$(git diff --name-only --diff-filter=ACMR HEAD~1 -- '*.ts' '*.tsx')
+            FILES=$(git diff --name-only --diff-filter=ACMR ${BEFORE_SHA}...HEAD -- '*.ts' '*.tsx')
           fi
           if [ -n "$FILES" ]; then
             echo "Linting changed files:"
             echo "$FILES"
-            echo "$FILES" | xargs npx eslint --report-unused-disable-directives --max-warnings 0
+            echo "$FILES" | xargs npx eslint --ext ts,tsx --report-unused-disable-directives --max-warnings 0
           else
             echo "No TypeScript files changed, skipping lint"
           fi
