@@ -9,7 +9,9 @@ function syncLocalOpenClawExtensions(runtimeRoot) {
   const targetRoot = runtimeRoot
     ? path.resolve(runtimeRoot)
     : path.join(rootDir, 'vendor', 'openclaw-runtime', 'current');
-  const targetExtensionsDir = path.join(targetRoot, 'extensions');
+  const targetExtensionsDir = fs.existsSync(path.join(targetRoot, 'dist', 'extensions'))
+    ? path.join(targetRoot, 'dist', 'extensions')
+    : path.join(targetRoot, 'extensions');
 
   if (!fs.existsSync(sourceDir)) {
     return { sourceDir, targetRoot, copied: [] };

@@ -139,7 +139,10 @@ for (const plugin of plugins) {
 
 const forceInstall = process.env.OPENCLAW_FORCE_PLUGIN_INSTALL === '1';
 const pluginCacheBase = path.join(rootDir, 'vendor', 'openclaw-plugins');
-const runtimeExtensionsDir = path.join(rootDir, 'vendor', 'openclaw-runtime', 'current', 'extensions');
+const runtimeCurrentDir = path.join(rootDir, 'vendor', 'openclaw-runtime', 'current');
+const runtimeExtensionsDir = fs.existsSync(path.join(runtimeCurrentDir, 'dist', 'extensions'))
+  ? path.join(runtimeCurrentDir, 'dist', 'extensions')
+  : path.join(runtimeCurrentDir, 'extensions');
 
 // Verify runtime extensions directory exists
 if (!fs.existsSync(runtimeExtensionsDir)) {
