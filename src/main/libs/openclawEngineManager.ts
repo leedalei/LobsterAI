@@ -430,6 +430,11 @@ export class OpenClawEngineManager extends EventEmitter {
       // regions with slow external API access.  See openclaw/openclaw#60116.
       // Requires the v2026.4.5 source patch (scripts/patches/v2026.4.5/).
       OPENCLAW_SKIP_MODEL_PRICING: '1',
+      // Skip openclaw-qqbot preload.cjs symlink creation.  That script runs
+      // execSync("npm root -g") up to 3× (timeout 5s each) to locate a global
+      // openclaw installation — irrelevant when the gateway is embedded in
+      // LobsterAI.  Saves ~7-9s during plugin init.
+      OPENCLAW_SKIP_PRELOAD_SYMLINK: '1',
       // Disable Bonjour/mDNS LAN discovery advertising.  LobsterAI is a
       // desktop app with a loopback-only gateway — LAN service broadcast is
       // unnecessary and its watchdog can flood stderr with re-advertise
