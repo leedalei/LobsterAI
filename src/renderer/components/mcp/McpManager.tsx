@@ -1,19 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import SearchIcon from '../icons/SearchIcon';
-import TrashIcon from '../icons/TrashIcon';
-import PencilIcon from '../icons/PencilIcon';
-import ConnectorIcon from '../icons/ConnectorIcon';
+
+import { mcpCategories,mcpRegistry } from '../../data/mcpRegistry';
 import { i18nService } from '../../services/i18n';
 import { mcpService } from '../../services/mcp';
-import { setMcpServers } from '../../store/slices/mcpSlice';
 import { RootState } from '../../store';
-import { McpServerConfig, McpServerFormData, McpRegistryEntry, McpMarketplaceCategoryInfo } from '../../types/mcp';
-import { mcpRegistry, mcpCategories } from '../../data/mcpRegistry';
+import { setMcpServers } from '../../store/slices/mcpSlice';
+import { McpMarketplaceCategoryInfo,McpRegistryEntry, McpServerConfig, McpServerFormData } from '../../types/mcp';
+import Modal from '../common/Modal';
 import ErrorMessage from '../ErrorMessage';
+import ConnectorIcon from '../icons/ConnectorIcon';
+import PencilIcon from '../icons/PencilIcon';
+import SearchIcon from '../icons/SearchIcon';
+import TrashIcon from '../icons/TrashIcon';
 import Tooltip from '../ui/Tooltip';
 import McpServerFormModal from './McpServerFormModal';
-import Modal from '../common/Modal';
 
 const TRANSPORT_BADGE_COLORS: Record<string, string> = {
   stdio: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
@@ -22,12 +23,19 @@ const TRANSPORT_BADGE_COLORS: Record<string, string> = {
 };
 
 type McpTab = 'installed' | 'marketplace' | 'custom';
+const McpStatusFilter = {
+  All: 'all',
+  Enabled: 'enabled',
+  Disabled: 'disabled',
+} as const;
+type McpStatusFilter = typeof McpStatusFilter[keyof typeof McpStatusFilter];
 
 const McpManager: React.FC = () => {
   const dispatch = useDispatch();
   const servers = useSelector((state: RootState) => state.mcp.servers);
 
   const [activeTab, setActiveTab] = useState<McpTab>('installed');
+  const [activeStatusFilter, setActiveStatusFilter] = useState<McpStatusFilter>(McpStatusFilter.All);
   const [searchQuery, setSearchQuery] = useState('');
   const [actionError, setActionError] = useState('');
   const [pendingDelete, setPendingDelete] = useState<McpServerConfig | null>(null);
@@ -134,22 +142,28 @@ const McpManager: React.FC = () => {
 
   const filteredInstalled = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    if (!query) return servers;
-    return servers.filter(server =>
-      server.name.toLowerCase().includes(query)
-      || getInstalledDescription(server).toLowerCase().includes(query)
-    );
-  }, [servers, searchQuery, dynamicRegistry, currentLanguage]);
+    return servers.filter(server => {
+      const matchesSearch = !query
+        || server.name.toLowerCase().includes(query)
+        || getInstalledDescription(server).toLowerCase().includes(query);
+      const matchesFilter = activeStatusFilter === McpStatusFilter.All
+        || (activeStatusFilter === McpStatusFilter.Enabled ? server.enabled : !server.enabled);
+      return matchesSearch && matchesFilter;
+    });
+  }, [servers, searchQuery, activeStatusFilter, dynamicRegistry, currentLanguage]);
 
   const filteredCustom = useMemo(() => {
     const custom = servers.filter(s => !s.isBuiltIn);
     const query = searchQuery.toLowerCase();
-    if (!query) return custom;
-    return custom.filter(s =>
-      s.name.toLowerCase().includes(query)
-      || s.description.toLowerCase().includes(query)
-    );
-  }, [servers, searchQuery]);
+    return custom.filter(server => {
+      const matchesSearch = !query
+        || server.name.toLowerCase().includes(query)
+        || server.description.toLowerCase().includes(query);
+      const matchesFilter = activeStatusFilter === McpStatusFilter.All
+        || (activeStatusFilter === McpStatusFilter.Enabled ? server.enabled : !server.enabled);
+      return matchesSearch && matchesFilter;
+    });
+  }, [servers, searchQuery, activeStatusFilter]);
 
   const filteredMarketplace = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -297,6 +311,27 @@ const McpManager: React.FC = () => {
     [servers]
   );
 
+  const installedStats = useMemo(() => {
+    const total = servers.length;
+    const enabled = servers.filter(server => server.enabled).length;
+    return {
+      total,
+      enabled,
+      disabled: total - enabled,
+    };
+  }, [servers]);
+
+  const customStats = useMemo(() => {
+    const customServers = servers.filter(server => !server.isBuiltIn);
+    const total = customServers.length;
+    const enabled = customServers.filter(server => server.enabled).length;
+    return {
+      total,
+      enabled,
+      disabled: total - enabled,
+    };
+  }, [servers]);
+
   const tabClass = (tab: McpTab) =>
     `px-4 py-2 text-sm font-medium transition-colors relative ${
       activeTab === tab
@@ -425,6 +460,44 @@ const McpManager: React.FC = () => {
                 {(i18nService.getLanguage() === 'zh' ? cat.name_zh : cat.name_en) || i18nService.t(cat.key)}
               </button>
             ))}
+          </div>
+        )}
+
+        {(activeTab === 'installed' || activeTab === 'custom') && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setActiveStatusFilter(McpStatusFilter.All)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeStatusFilter === McpStatusFilter.All
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('mcpCategoryAll')} ({activeTab === 'installed' ? installedStats.total : customStats.total})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveStatusFilter(McpStatusFilter.Enabled)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeStatusFilter === McpStatusFilter.Enabled
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('enabled')} ({activeTab === 'installed' ? installedStats.enabled : customStats.enabled})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveStatusFilter(McpStatusFilter.Disabled)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeStatusFilter === McpStatusFilter.Disabled
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('disabled')} ({activeTab === 'installed' ? installedStats.disabled : customStats.disabled})
+            </button>
           </div>
         )}
       </div>
