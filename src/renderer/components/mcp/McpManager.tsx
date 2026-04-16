@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import { mcpCategories,mcpRegistry } from '../../data/mcpRegistry';
@@ -9,11 +9,6 @@ import { setMcpServers } from '../../store/slices/mcpSlice';
 import { McpMarketplaceCategoryInfo,McpRegistryEntry, McpServerConfig, McpServerFormData } from '../../types/mcp';
 import Modal from '../common/Modal';
 import ErrorMessage from '../ErrorMessage';
-import ConnectorIcon from '../icons/ConnectorIcon';
-import PencilIcon from '../icons/PencilIcon';
-import SearchIcon from '../icons/SearchIcon';
-import TrashIcon from '../icons/TrashIcon';
-import Tooltip from '../ui/Tooltip';
 import McpServerFormModal from './McpServerFormModal';
 
 const TRANSPORT_BADGE_COLORS: Record<string, string> = {
@@ -23,6 +18,52 @@ const TRANSPORT_BADGE_COLORS: Record<string, string> = {
 };
 
 type McpTab = 'installed' | 'marketplace' | 'custom';
+
+/**
+ * Text with line-clamp-2 that shows a popover above the text when truncated.
+ */
+const ClampedText: React.FC<{ text: string; className?: string }> = ({ text, className = '' }) => {
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [isClamped, setIsClamped] = useState(false);
+  const [showFull, setShowFull] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const checkClamp = useCallback(() => {
+    const el = textRef.current;
+    if (el) setIsClamped(el.scrollHeight > el.clientHeight + 1);
+  }, []);
+
+  useEffect(() => {
+    checkClamp();
+    window.addEventListener('resize', checkClamp);
+    return () => window.removeEventListener('resize', checkClamp);
+  }, [text, checkClamp]);
+
+  const handleEnter = () => {
+    if (!isClamped) return;
+    timerRef.current = setTimeout(() => setShowFull(true), 400);
+  };
+
+  const handleLeave = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    setShowFull(false);
+  };
+
+  return (
+    <div className="relative" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+      <p ref={textRef} className={`line-clamp-2 ${className}`}>{text}</p>
+      {showFull && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 z-50
+          rounded-lg px-3 py-2 text-xs leading-relaxed
+          bg-surface-raised text-foreground
+          shadow-xl border border-border"
+        >
+          {text}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const McpManager: React.FC = () => {
   const dispatch = useDispatch();
@@ -488,16 +529,7 @@ const McpManager: React.FC = () => {
                     </div>
                   </div>
 
-                  <Tooltip
-                    content={installedDescription}
-                    position="bottom"
-                    maxWidth="360px"
-                    className="block w-full"
-                  >
-                    <p className="text-xs text-secondary line-clamp-2 mb-2">
-                      {installedDescription}
-                    </p>
-                  </Tooltip>
+                  <ClampedText text={installedDescription} className="text-xs text-secondary mb-2" />
 
                   <div className="flex items-center gap-2 text-[10px] text-secondary min-w-0">
                     <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${TRANSPORT_BADGE_COLORS[server.transportType] || ''}`}>
@@ -571,9 +603,7 @@ const McpManager: React.FC = () => {
                     </div>
                   </div>
 
-                  <p className="text-xs text-secondary line-clamp-2 mb-2">
-                    {getRegistryEntryDescription(entry)}
-                  </p>
+                  <ClampedText text={getRegistryEntryDescription(entry)} className="text-xs text-secondary mb-2" />
 
                   <div className="flex items-center gap-2 text-[10px] text-secondary min-w-0">
                     <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${TRANSPORT_BADGE_COLORS[entry.transportType] || ''}`}>
@@ -656,16 +686,7 @@ const McpManager: React.FC = () => {
                     </div>
                   </div>
 
-                  <Tooltip
-                    content={server.description || getTransportSummary(server)}
-                    position="bottom"
-                    maxWidth="360px"
-                    className="block w-full"
-                  >
-                    <p className="text-xs text-secondary line-clamp-2 mb-2">
-                      {server.description || getTransportSummary(server)}
-                    </p>
-                  </Tooltip>
+                  <ClampedText text={server.description || getTransportSummary(server)} className="text-xs text-secondary mb-2" />
 
                   <div className="flex items-center gap-2 text-[10px] text-secondary min-w-0">
                     <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${TRANSPORT_BADGE_COLORS[server.transportType] || ''}`}>

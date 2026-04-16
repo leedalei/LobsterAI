@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 import { IpcChannel as ScheduledTaskIpc } from '../scheduledTask/constants';
 import type { Platform } from '../shared/platform';
+import { OpenClawSessionIpc } from './openclawSession/constants';
 import { OpenClawSessionPolicyIpc } from './openclawSessionPolicy/constants';
 
 // 暴露安全的 API 到渲染进程
@@ -155,6 +156,19 @@ contextBridge.exposeInMainWorld('electron', {
       get: () => ipcRenderer.invoke(OpenClawSessionPolicyIpc.Get),
       set: (config: { keepAlive: '1d' | '7d' | '30d' | '365d' }) =>
         ipcRenderer.invoke(OpenClawSessionPolicyIpc.Set, config),
+    },
+    session: {
+      patch: (options: {
+        sessionId: string;
+        patch: {
+          model?: string | null;
+          thinkingLevel?: string | null;
+          reasoningLevel?: string | null;
+          elevatedLevel?: string | null;
+          responseUsage?: 'off' | 'tokens' | 'full' | null;
+          sendPolicy?: 'allow' | 'deny' | null;
+        };
+      }) => ipcRenderer.invoke(OpenClawSessionIpc.Patch, options),
     },
   },
   agents: {

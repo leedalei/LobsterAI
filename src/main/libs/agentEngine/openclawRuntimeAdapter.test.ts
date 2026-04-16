@@ -23,6 +23,7 @@ function createReconcileStore(messages: Array<Record<string, unknown>>) {
     pinned: false,
     cwd: '',
     systemPrompt: '',
+    modelOverride: '',
     executionMode: 'local',
     activeSkillIds: [],
     messages: [...messages],

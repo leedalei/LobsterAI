@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { OpenClawSessionPatch } from '../../../common/openclawSession';
 import type { CoworkExecutionMode, CoworkMessage, CoworkSession, CoworkSessionStatus, CoworkStore } from '../../coworkStore';
 import { t } from '../../i18n';
 import { getCommandDangerLevel,isDeleteCommand } from '../commandSafety';
@@ -757,6 +758,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         pinned: false,
         cwd: '',
         systemPrompt: '',
+        modelOverride: '',
         executionMode: 'local' as CoworkExecutionMode,
         activeSkillIds: [],
         messages,
@@ -855,6 +857,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         pinned: false,
         cwd: '',
         systemPrompt: '',
+        modelOverride: '',
         executionMode: 'local' as CoworkExecutionMode,
         activeSkillIds: [],
         messages,
@@ -1073,6 +1076,29 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       systemPrompt: options.systemPrompt,
       skillIds: options.skillIds,
       imageAttachments: options.imageAttachments,
+    });
+  }
+
+  async patchSession(sessionId: string, patch: OpenClawSessionPatch): Promise<void> {
+    const session = this.store.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const activeTurnSessionKey = this.activeTurns.get(sessionId)?.sessionKey?.trim();
+    const rememberedSessionKey = this.getSessionKeysForSession(sessionId)
+      .find((key) => !isManagedSessionKey(key));
+    const agentId = session.agentId || 'main';
+    const sessionKey = activeTurnSessionKey
+      || rememberedSessionKey
+      || this.toSessionKey(sessionId, agentId);
+    this.rememberSessionKey(sessionId, sessionKey);
+    await this.ensureGatewayClientReady();
+
+    const client = this.requireGatewayClient();
+    await client.request('sessions.patch', {
+      key: sessionKey,
+      ...patch,
     });
   }
 
