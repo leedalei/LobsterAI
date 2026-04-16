@@ -9,6 +9,10 @@ import { setMcpServers } from '../../store/slices/mcpSlice';
 import { McpMarketplaceCategoryInfo,McpRegistryEntry, McpServerConfig, McpServerFormData } from '../../types/mcp';
 import Modal from '../common/Modal';
 import ErrorMessage from '../ErrorMessage';
+import ConnectorIcon from '../icons/ConnectorIcon';
+import PencilIcon from '../icons/PencilIcon';
+import SearchIcon from '../icons/SearchIcon';
+import TrashIcon from '../icons/TrashIcon';
 import McpServerFormModal from './McpServerFormModal';
 
 const TRANSPORT_BADGE_COLORS: Record<string, string> = {
