@@ -28,6 +28,12 @@ import SkillSecurityReport from './SkillSecurityReport';
 
 type SkillTab = 'installed' | 'marketplace';
 type ImportSourceType = 'github' | 'clawhub';
+const SkillEnableFilter = {
+  All: 'all',
+  Enabled: 'enabled',
+  Disabled: 'disabled',
+} as const;
+type SkillEnableFilter = typeof SkillEnableFilter[keyof typeof SkillEnableFilter];
 
 const importSourceTypes: ImportSourceType[] = ['github', 'clawhub'];
 
@@ -66,6 +72,7 @@ const SkillsManager: React.FC<SkillsManagerProps> = ({ readOnly, onCreateByChat 
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
   const [skillDownloadSource, setSkillDownloadSource] = useState('');
   const [skillActionError, setSkillActionError] = useState('');
+  const [activeInstalledFilter, setActiveInstalledFilter] = useState<SkillEnableFilter>(SkillEnableFilter.All);
   const [isDownloadingSkill, setIsDownloadingSkill] = useState(false);
   const [isAddSkillMenuOpen, setIsAddSkillMenuOpen] = useState(false);
   const [isRemoteImportOpen, setIsRemoteImportOpen] = useState(false);
@@ -188,14 +195,26 @@ const SkillsManager: React.FC<SkillsManagerProps> = ({ readOnly, onCreateByChat 
     };
   }, [selectedSkill, selectedMarketplaceSkill]);
 
+  const installedSkillStats = useMemo(() => {
+    const total = skills.length;
+    const enabled = skills.filter(skill => skill.enabled).length;
+    return {
+      total,
+      enabled,
+      disabled: total - enabled,
+    };
+  }, [skills]);
+
   const filteredSkills = useMemo(() => {
     const query = skillSearchQuery.toLowerCase();
     return skills.filter(skill => {
       const matchesSearch = skill.name.toLowerCase().includes(query)
         || skillService.getLocalizedSkillDescription(skill.id, skill.name, skill.description).toLowerCase().includes(query);
-      return matchesSearch;
+      const matchesFilter = activeInstalledFilter === SkillEnableFilter.All
+        || (activeInstalledFilter === SkillEnableFilter.Enabled ? skill.enabled : !skill.enabled);
+      return matchesSearch && matchesFilter;
     });
-  }, [skills, skillSearchQuery]);
+  }, [skills, skillSearchQuery, activeInstalledFilter]);
 
   const filteredMarketplaceSkills = useMemo(() => {
     const query = skillSearchQuery.toLowerCase();
@@ -690,6 +709,45 @@ const SkillsManager: React.FC<SkillsManagerProps> = ({ readOnly, onCreateByChat 
                 {resolveLocalizedText(tag)}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Enable state filter pills (Installed only) */}
+        {activeTab === 'installed' && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setActiveInstalledFilter(SkillEnableFilter.All)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeInstalledFilter === SkillEnableFilter.All
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('skillCategoryAll')} ({installedSkillStats.total})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveInstalledFilter(SkillEnableFilter.Enabled)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeInstalledFilter === SkillEnableFilter.Enabled
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('enabled')} ({installedSkillStats.enabled})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveInstalledFilter(SkillEnableFilter.Disabled)}
+              className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                activeInstalledFilter === SkillEnableFilter.Disabled
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-secondary hover:bg-surface-raised border border-border'
+              }`}
+            >
+              {i18nService.t('disabled')} ({installedSkillStats.disabled})
+            </button>
           </div>
         )}
       </div>
