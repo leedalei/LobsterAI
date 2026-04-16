@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import {
+  CheckCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   SignalIcon,
-  CheckCircleIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
-import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+
 import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
 
@@ -19,6 +20,7 @@ interface ProviderPreset {
   smtpHost: string;
   smtpPort: string;
   smtpSecure: string;
+  emailDomains?: string[];
   hint?: string;
 }
 
@@ -43,6 +45,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     smtpHost: 'smtp.gmail.com',
     smtpPort: '587',
     smtpSecure: 'false',
+    emailDomains: ['gmail.com'],
     hint: 'emailHintGmail',
   },
   outlook: {
@@ -52,6 +55,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     smtpHost: 'smtp.office365.com',
     smtpPort: '587',
     smtpSecure: 'false',
+    emailDomains: ['outlook.com', 'hotmail.com', 'live.com'],
   },
   '163': {
     label: '163.com',
@@ -60,6 +64,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     smtpHost: 'smtp.163.com',
     smtpPort: '465',
     smtpSecure: 'true',
+    emailDomains: ['163.com'],
     hint: 'emailHint163',
   },
   '126': {
@@ -69,6 +74,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     smtpHost: 'smtp.126.com',
     smtpPort: '465',
     smtpSecure: 'true',
+    emailDomains: ['126.com'],
     hint: 'emailHint163',
   },
   qq: {
@@ -78,6 +84,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     smtpHost: 'smtp.qq.com',
     smtpPort: '587',
     smtpSecure: 'false',
+    emailDomains: ['qq.com'],
     hint: 'emailHintQQ',
   },
   custom: {
@@ -153,6 +160,9 @@ const EmailSkillConfig: React.FC<EmailSkillConfigProps> = ({ onClose }) => {
   const [isTesting, setIsTesting] = useState(false);
   const [connectivityResult, setConnectivityResult] = useState<EmailConnectivityTestResult | null>(null);
   const [connectivityError, setConnectivityError] = useState<string | null>(null);
+  const [isEmailFocused, setIsEmailFocused] = useState(false);
+  const [activeEmailSuggestionIndex, setActiveEmailSuggestionIndex] = useState(0);
+  const [emailSuggestionInteraction, setEmailSuggestionInteraction] = useState<'keyboard' | 'mouse'>('keyboard');
 
   const isMountedRef = useRef(true);
   const persistInFlightRef = useRef(false);
@@ -321,6 +331,81 @@ const EmailSkillConfig: React.FC<EmailSkillConfigProps> = ({ onClose }) => {
   };
 
   const currentPreset = provider ? PROVIDER_PRESETS[provider] : null;
+  const providerDomains = currentPreset?.emailDomains ?? [];
+  const providerDomain = providerDomains[0] ?? '';
+  const trimmedEmail = email.trim();
+  const emailSuggestions = (() => {
+    if (!providerDomains.length || !trimmedEmail) {
+      return [] as string[];
+    }
+    if (!trimmedEmail.includes('@')) {
+      return providerDomains.map((domain) => `${trimmedEmail}@${domain}`);
+    }
+
+    const [localPart, domainPartRaw = ''] = trimmedEmail.split('@', 2);
+    const domainPart = domainPartRaw.toLowerCase();
+    if (!localPart) {
+      return [] as string[];
+    }
+    if (!domainPart) {
+      return providerDomains.map((domain) => `${localPart}@${domain}`);
+    }
+    return providerDomains
+      .filter((domain) => domain.startsWith(domainPart) && domain !== domainPart)
+      .map((domain) => `${localPart}@${domain}`);
+  })();
+  const emailSuggestionsKey = emailSuggestions.join('|');
+
+  useEffect(() => {
+    if (!isEmailFocused) {
+      setActiveEmailSuggestionIndex(0);
+      return;
+    }
+    if (activeEmailSuggestionIndex >= emailSuggestions.length) {
+      setActiveEmailSuggestionIndex(0);
+    }
+  }, [activeEmailSuggestionIndex, emailSuggestions.length, emailSuggestionsKey, isEmailFocused]);
+
+  const applyEmailSuggestion = useCallback((candidate?: string) => {
+    const nextValue = candidate ?? emailSuggestions[activeEmailSuggestionIndex];
+    if (!nextValue) {
+      return;
+    }
+    setEmail(nextValue);
+    setIsEmailFocused(false);
+    setTimeout(queuePersist, 0);
+  }, [activeEmailSuggestionIndex, emailSuggestions, queuePersist]);
+  const handleEmailKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    setEmailSuggestionInteraction('keyboard');
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsEmailFocused(false);
+      return;
+    }
+
+    if (!isEmailFocused || !emailSuggestions.length) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveEmailSuggestionIndex((prev) => (prev + 1) % emailSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveEmailSuggestionIndex((prev) => (prev - 1 + emailSuggestions.length) % emailSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'Tab' || event.key === 'Enter') {
+      event.preventDefault();
+      applyEmailSuggestion();
+    }
+  }, [applyEmailSuggestion, emailSuggestions.length, isEmailFocused]);
+  const emailPlaceholder = providerDomain ? `your@${providerDomain}` : 'your@email.com';
   const hintKey = currentPreset?.hint;
   const canTest = Boolean(email && password && imapHost && smtpHost);
   const connectivityPassed = connectivityResult?.verdict === 'pass';
@@ -393,10 +478,59 @@ const EmailSkillConfig: React.FC<EmailSkillConfigProps> = ({ onClose }) => {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            onBlur={queuePersist}
+            onFocus={() => {
+              setIsEmailFocused(true);
+              setActiveEmailSuggestionIndex(0);
+              setEmailSuggestionInteraction('keyboard');
+            }}
+            onBlur={() => {
+              setIsEmailFocused(false);
+              queuePersist();
+            }}
+            onKeyDown={handleEmailKeyDown}
+            autoComplete="email"
             className={`${inputClassName} pr-8`}
-            placeholder="your@email.com"
+            placeholder={emailPlaceholder}
           />
+          {isEmailFocused && emailSuggestions.length > 0 && (
+            <div
+              role="listbox"
+              className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 rounded-xl border border-border-subtle bg-surface-raised shadow-elevated px-2 py-1.5"
+            >
+              <div className="space-y-0.5">
+                {emailSuggestions.map((suggestion, index) => {
+                  const isActive = index === activeEmailSuggestionIndex;
+                  return (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseMove={() => {
+                        if (emailSuggestionInteraction !== 'mouse') {
+                          setEmailSuggestionInteraction('mouse');
+                        }
+                        if (activeEmailSuggestionIndex !== index) {
+                          setActiveEmailSuggestionIndex(index);
+                        }
+                      }}
+                      onClick={() => applyEmailSuggestion(suggestion)}
+                      className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'border border-border-subtle bg-surface text-foreground'
+                          : 'border border-transparent text-foreground hover:bg-surface-inset'
+                      }`}
+                    >
+                      <span className="truncate">
+                        {suggestion}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {email && (
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
               <button
